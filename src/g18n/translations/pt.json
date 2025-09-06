@@ -1,0 +1,14 @@
+{
+  "hello": "Olá",
+  "goodbye": "Tchau",
+  "welcome": "Bem-vindo {name}!",
+  "item.zero": "0 itens",
+  "item.one": "1 item", 
+  "item.other": "{count} itens",
+  "user.greeting": "Olá, {name}! Você tem {count} mensagens.",
+  "error.not_found": "Item não encontrado",
+  "error.invalid_input": "Entrada inválida fornecida",
+  "button.save": "Salvar",
+  "button.cancel": "Cancelar",
+  "button.delete": "Excluir"
+}

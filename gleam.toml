@@ -1,0 +1,29 @@
+name = "g18n"
+version = "0.2.0"
+
+description = "A comprehensive platform-agnostic internationalization library for Gleam with multi-language date/time formatting, pluralization rules, and locale-aware number formatting"
+licences = ["MIT"]
+repository = { type = "github", user = "renatillas", repo = "g18n" }
+links = [{ title = "Website", href = "https://github.com/renatillas/g18n" }]
+
+# Package metadata
+[package]
+authors = ["Renata Amutio"]
+# For a full reference of all the available options, you can have a look at
+# https://gleam.run/writing-gleam/gleam-toml/.
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+splitter = ">= 1.1.0 and < 2.0.0"
+gleam_regexp = ">= 1.1.1 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+filepath = ">= 1.0.0 and < 2.0.0"
+simplifile = ">= 2.0.0 and < 3.0.0"
+tom = ">= 1.0.0 and < 2.0.0"
+argv = ">= 1.0.0 and < 2.0.0"
+trie_again = ">= 1.0.0 and < 2.0.0"
+gleam_time = ">= 1.4.0 and < 2.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+testament = ">= 0.3.1 and < 1.0.0"
