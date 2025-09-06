@@ -972,3 +972,248 @@ pub fn validation_parameter_test() {
     )
   assert list.length(missing_translation_errors) == 1
 }
+
+// Tests for high-priority features added
+pub fn rtl_ltr_support_test() {
+  let assert Ok(english) = g18n.locale("en")
+  let assert Ok(arabic) = g18n.locale("ar")
+  let assert Ok(hebrew) = g18n.locale("he")
+  let assert Ok(persian) = g18n.locale("fa")
+  let assert Ok(spanish) = g18n.locale("es")
+
+  // Test RTL languages
+  assert g18n.get_text_direction(arabic) == g18n.RTL
+  assert g18n.get_text_direction(hebrew) == g18n.RTL
+  assert g18n.get_text_direction(persian) == g18n.RTL
+  assert g18n.is_rtl(arabic) == True
+  assert g18n.is_rtl(hebrew) == True
+  assert g18n.get_css_direction(arabic) == "rtl"
+  assert g18n.get_css_direction(hebrew) == "rtl"
+
+  // Test LTR languages
+  assert g18n.get_text_direction(english) == g18n.LTR
+  assert g18n.get_text_direction(spanish) == g18n.LTR
+  assert g18n.is_rtl(english) == False
+  assert g18n.is_rtl(spanish) == False
+  assert g18n.get_css_direction(english) == "ltr"
+  assert g18n.get_css_direction(spanish) == "ltr"
+}
+
+pub fn locale_negotiation_test() {
+  let assert Ok(en) = g18n.locale("en")
+  let assert Ok(en_us) = g18n.locale("en-US")
+  let assert Ok(es) = g18n.locale("es")
+  let assert Ok(fr) = g18n.locale("fr")
+
+  let available = [Ok(en), Ok(en_us), Ok(es), Ok(fr)]
+
+  // Test exact match
+  let preferred_exact = [Ok(es)]
+  case g18n.negotiate_locale(available, preferred_exact) {
+    Some(locale) -> {
+      assert g18n.locale_string(locale) == "es"
+    }
+    None -> panic
+  }
+
+  // Test language match (en-GB should match en)
+  let assert Ok(en_gb) = g18n.locale("en-GB")
+  let preferred_lang_match = [Ok(en_gb)]
+  case g18n.negotiate_locale(available, preferred_lang_match) {
+    Some(locale) -> {
+      assert g18n.locale_language(locale) == "en"
+    }
+    None -> panic
+  }
+
+  // Test no match - should return first available
+  let assert Ok(de) = g18n.locale("de")
+  let preferred_no_match = [Ok(de)]
+  case g18n.negotiate_locale(available, preferred_no_match) {
+    Some(locale) -> {
+      assert g18n.locale_string(locale) == "en"
+      // First available
+    }
+    None -> panic
+  }
+}
+
+pub fn accept_language_parsing_test() {
+  let parsed = g18n.parse_accept_language("en-US,en;q=0.9,fr;q=0.8")
+  assert list.length(parsed) == 3
+
+  case parsed {
+    [Ok(first), Ok(second), Ok(third)] -> {
+      assert g18n.locale_string(first) == "en-US"
+      assert g18n.locale_string(second) == "en"
+      assert g18n.locale_string(third) == "fr"
+    }
+    _ -> panic
+  }
+
+  // Test quality scoring
+  let assert Ok(en_us) = g18n.locale("en-US")
+  let assert Ok(en) = g18n.locale("en")
+  let assert Ok(fr) = g18n.locale("fr")
+
+  // Exact match should have highest score
+  assert g18n.get_locale_quality_score(en_us, en_us) == 1.0
+  // Language match should have lower score
+  assert g18n.get_locale_quality_score(en_us, en) == 0.8
+  // No match should have zero score
+  assert g18n.get_locale_quality_score(en_us, fr) == 0.0
+}
+
+pub fn expanded_pluralization_test() {
+  // Test Arabic pluralization (6 forms)
+  let ar_rule = g18n.get_locale_plural_rule("ar")
+  assert ar_rule(0) == g18n.Zero
+  assert ar_rule(1) == g18n.One
+  assert ar_rule(2) == g18n.Two
+  assert ar_rule(5) == g18n.Few
+  assert ar_rule(15) == g18n.Many
+  assert ar_rule(100) == g18n.Other
+
+  // Test Spanish pluralization
+  let es_rule = g18n.get_locale_plural_rule("es")
+  assert es_rule(1) == g18n.One
+  assert es_rule(0) == g18n.Other
+  assert es_rule(5) == g18n.Other
+
+  // Test French pluralization (0 and 1 are singular)
+  let fr_rule = g18n.get_locale_plural_rule("fr")
+  assert fr_rule(0) == g18n.One
+  assert fr_rule(1) == g18n.One
+  assert fr_rule(2) == g18n.Other
+
+  // Test German pluralization
+  let de_rule = g18n.get_locale_plural_rule("de")
+  assert de_rule(1) == g18n.One
+  assert de_rule(0) == g18n.Other
+  assert de_rule(3) == g18n.Other
+
+  // Test Italian pluralization
+  let it_rule = g18n.get_locale_plural_rule("it")
+  assert it_rule(1) == g18n.One
+  assert it_rule(0) == g18n.Other
+  assert it_rule(2) == g18n.Other
+
+  // Test Chinese pluralization (no plurals)
+  let zh_rule = g18n.get_locale_plural_rule("zh")
+  assert zh_rule(0) == g18n.Other
+  assert zh_rule(1) == g18n.Other
+  assert zh_rule(100) == g18n.Other
+
+  // Test Japanese pluralization (no plurals)
+  let ja_rule = g18n.get_locale_plural_rule("ja")
+  assert ja_rule(0) == g18n.Other
+  assert ja_rule(1) == g18n.Other
+  assert ja_rule(100) == g18n.Other
+
+  // Test Korean pluralization (no plurals)
+  let ko_rule = g18n.get_locale_plural_rule("ko")
+  assert ko_rule(0) == g18n.Other
+  assert ko_rule(1) == g18n.Other
+  assert ko_rule(100) == g18n.Other
+
+  // Test Hindi pluralization
+  let hi_rule = g18n.get_locale_plural_rule("hi")
+  assert hi_rule(0) == g18n.One
+  assert hi_rule(1) == g18n.One
+  assert hi_rule(2) == g18n.Other
+}
+
+pub fn context_sensitive_translation_test() {
+  let assert Ok(locale) = g18n.locale("en")
+  let translations =
+    g18n.translations()
+    |> g18n.add_translation("may", "may")
+    // auxiliary verb
+    |> g18n.add_translation("may@month", "May")
+    // month name
+    |> g18n.add_translation("may@permission", "allowed to")
+    // permission
+    |> g18n.add_translation("bank", "bank")
+    |> g18n.add_context_translation(
+      "bank",
+      "financial",
+      "financial institution",
+    )
+    |> g18n.add_context_translation("bank", "river", "riverbank")
+
+  let translator = g18n.translator(locale, translations)
+
+  // Test context translation
+  assert g18n.translate_with_context(translator, "may", g18n.NoContext) == "may"
+  assert g18n.translate_with_context(translator, "may", g18n.Context("month"))
+    == "May"
+  assert g18n.translate_with_context(
+      translator,
+      "may",
+      g18n.Context("permission"),
+    )
+    == "allowed to"
+
+  // Test context with parameters
+  let translations_with_params =
+    translations
+    |> g18n.add_translation("close@door", "Close the {item}")
+    |> g18n.add_translation("close@application", "Close {app_name}")
+
+  let translator_with_params = g18n.translator(locale, translations_with_params)
+  let params = g18n.format_params() |> g18n.add_param("item", "door")
+
+  assert g18n.translate_with_context_and_params(
+      translator_with_params,
+      "close",
+      g18n.Context("door"),
+      params,
+    )
+    == "Close the door"
+
+  // Test context variants
+  let variants = g18n.get_context_variants(translations, "bank")
+  assert list.length(variants) == 3
+  // bank, bank@financial, bank@river
+
+  // Test missing context falls back to base key
+  assert g18n.translate_with_context(translator, "may", g18n.Context("unknown"))
+    == "may@unknown"
+}
+
+pub fn nested_json_import_test() {
+  let nested_json =
+    json.object([
+      #(
+        "ui",
+        json.object([
+          #(
+            "button",
+            json.object([
+              #("save", json.string("Save")),
+              #("cancel", json.string("Cancel")),
+            ]),
+          ),
+        ]),
+      ),
+    ])
+
+  let assert Ok(translations) =
+    g18n.translations_from_nested_json(nested_json |> json.to_string)
+  let assert Ok(locale) = g18n.locale("en")
+  let translator = g18n.translator(locale, translations)
+
+  // Test that nested keys are flattened correctly
+  assert g18n.translate(translator, "ui.button.save") == "Save"
+  assert g18n.translate(translator, "ui.button.cancel") == "Cancel"
+
+  let translations =
+    g18n.translations()
+    |> g18n.add_translation("ui.button.save", "Save")
+    |> g18n.add_translation("user.name", "Name")
+
+  let exported = g18n.translations_to_nested_json(translations)
+  // Should contain the translations in nested JSON format
+  let expected = "{\"ui\":{\"button\":{\"save\":\"Save\"}},\"user\":{\"name\":\"Name\"}}"
+  assert exported == expected
+}
