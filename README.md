@@ -119,6 +119,7 @@ g18n.format_number(translator, 1234.56, g18n.Currency("USD", 2)) // "$1234.56"
 g18n supports both flat and nested JSON formats for maximum compatibility:
 
 ### Nested JSON (Industry Standard)
+
 ```json
 {
   "ui": {
@@ -138,6 +139,7 @@ g18n supports both flat and nested JSON formats for maximum compatibility:
 ```
 
 ### Flat JSON (g18n Optimized)  
+
 ```json
 {
   "ui.button.save": "Save",
@@ -155,6 +157,7 @@ Both formats are automatically converted to g18n's efficient trie-based internal
 Place JSON files (either format) in `src/<project>/translations/`:
 
 **en.json:**
+
 ```json
 {
   "welcome": "Welcome {name}!",
@@ -164,6 +167,7 @@ Place JSON files (either format) in `src/<project>/translations/`:
 ```
 
 **es.json:**
+
 ```json
 {
   "welcome": "¡Bienvenido {name}!",
@@ -172,17 +176,20 @@ Place JSON files (either format) in `src/<project>/translations/`:
 }
 ```
 
-### Generate from Flat JSON (g18n optimized):
+### Generate from Flat JSON (g18n optimized)
+
 ```bash
-gleam run generate
+gleam run -m g18n generate
 ```
 
-### Generate from Nested JSON (industry standard):
+### Generate from Nested JSON (industry standard)
+
 ```bash
-gleam run generate_nested
+gleam run -m g18n generate_nested
 ```
 
 Use generated translations:
+
 ```gleam
 import my_project/translations
 
