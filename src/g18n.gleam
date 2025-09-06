@@ -197,6 +197,23 @@ fn parse_locale(locale_code: String) -> Result(Locale, LocaleError) {
 }
 
 // Translator Functions
+/// Create a new translator with the specified locale and translations.
+///
+/// A translator combines a locale with a set of translations to provide
+/// localized text output. This is the main interface for translation operations.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(locale) = g18n.locale("en-US")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+///   |> g18n.add_translation("welcome", "Welcome {name}!")
+/// 
+/// let translator = g18n.translator(locale, translations)
+/// 
+/// g18n.translate(translator, "hello")
+/// // "Hello"
+/// ```
 pub fn translator(locale: Locale, translations: Translations) -> Translator {
   Translator(
     locale: locale,
@@ -206,6 +223,29 @@ pub fn translator(locale: Locale, translations: Translations) -> Translator {
   )
 }
 
+/// Add fallback locale and translations to an existing translator.
+///
+/// When a translation key is not found in the primary translations,
+/// the translator will fall back to the fallback translations before
+/// returning the original key.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en) = g18n.locale("en")
+/// let assert Ok(es) = g18n.locale("es")
+/// 
+/// let en_translations = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+/// 
+/// let es_translations = g18n.translations()
+///   |> g18n.add_translation("goodbye", "Adiós")
+/// 
+/// let translator = g18n.translator(es, es_translations)
+///   |> g18n.with_fallback(en, en_translations)
+/// 
+/// g18n.translate(translator, "goodbye") // "Adiós"
+/// g18n.translate(translator, "hello")   // "Hello" (from fallback)
+/// ```
 pub fn with_fallback(
   translator: Translator,
   fallback_locale: Locale,
@@ -218,6 +258,32 @@ pub fn with_fallback(
   )
 }
 
+/// Translate a key to localized text using the translator.
+///
+/// Looks up the translation for the given key in the translator's 
+/// translations. If not found, tries the fallback translations. 
+/// If still not found, returns the original key as fallback.
+///
+/// Supports hierarchical keys using dot notation for organization.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(locale) = g18n.locale("en")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("user.greeting", "Hello")
+/// 
+/// let translator = g18n.translator(locale, translations)
+/// 
+/// g18n.translate(translator, "ui.button.save")
+/// // "Save"
+/// 
+/// g18n.translate(translator, "user.greeting") 
+/// // "Hello"
+/// 
+/// g18n.translate(translator, "missing.key")
+/// // "missing.key" (fallback to key)
+/// ```
 pub fn translate(translator: Translator, key: String) -> String {
   let key_parts = string.split(key, ".")
   case trie.get(translator.translations, key_parts) {
@@ -226,6 +292,30 @@ pub fn translate(translator: Translator, key: String) -> String {
   }
 }
 
+/// Translate a key with parameter substitution.
+///
+/// Performs translation lookup and then substitutes parameters in the 
+/// resulting template. Parameters are specified using `{param}` syntax
+/// in the translation template.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(locale) = g18n.locale("en")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("user.welcome", "Welcome {name}!")
+///   |> g18n.add_translation("user.messages", "You have {count} new messages")
+/// 
+/// let translator = g18n.translator(locale, translations)
+/// let params = g18n.format_params()
+///   |> g18n.add_param("name", "Alice")
+///   |> g18n.add_param("count", "5")
+/// 
+/// g18n.translate_with_params(translator, "user.welcome", params)
+/// // "Welcome Alice!"
+/// 
+/// g18n.translate_with_params(translator, "user.messages", params)
+/// // "You have 5 new messages"
+/// ```
 pub fn translate_with_params(
   translator: Translator,
   key: String,
@@ -235,6 +325,38 @@ pub fn translate_with_params(
   format_string(template, params)
 }
 
+/// Translate with automatic pluralization based on count and locale rules.
+///
+/// Automatically selects the appropriate plural form based on the count
+/// and the language's pluralization rules. Supports multiple plural forms
+/// including zero, one, two, few, many, and other.
+///
+/// ## Supported Plural Rules
+/// - **English**: 1 → `.one`, others → `.other`
+/// - **Portuguese**: 0 → `.zero`, 1 → `.one`, others → `.other`  
+/// - **Russian**: Complex Slavic rules → `.one`/`.few`/`.many`
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en_locale) = g18n.locale("en")
+/// let assert Ok(pt_locale) = g18n.locale("pt")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("item.one", "1 item")
+///   |> g18n.add_translation("item.other", "{count} items")
+///   |> g18n.add_translation("item.zero", "no items")
+/// 
+/// let en_translator = g18n.translator(en_locale, translations)
+/// let pt_translator = g18n.translator(pt_locale, translations)
+/// 
+/// // English pluralization (1 → one, others → other)
+/// g18n.translate_plural(en_translator, "item", 1)  // "1 item"
+/// g18n.translate_plural(en_translator, "item", 5)  // "{count} items"
+/// 
+/// // Portuguese pluralization (0 → zero, 1 → one, others → other)  
+/// g18n.translate_plural(pt_translator, "item", 0)  // "no items"
+/// g18n.translate_plural(pt_translator, "item", 1)  // "1 item"
+/// g18n.translate_plural(pt_translator, "item", 3)  // "{count} items"
+/// ```
 pub fn translate_plural(
   translator: Translator,
   key: String,
@@ -246,6 +368,22 @@ pub fn translate_plural(
   translate(translator, plural_key)
 }
 
+/// Translate with pluralization and parameter substitution.
+///
+/// Combines pluralization and parameter substitution in a single function.
+/// First determines the appropriate plural form based on count and locale,
+/// then performs parameter substitution on the resulting template.
+///
+/// ## Examples
+/// ```gleam
+/// let params = dict.from_list([("name", "Alice"), ("count", "3")])
+/// 
+/// g18n.translate_plural_with_params(en_translator, "user.items", 3, params)
+/// // "Alice has 3 items"
+/// 
+/// g18n.translate_plural_with_params(en_translator, "user.items", 1, params) 
+/// // "Alice has 1 item"
+/// ```
 pub fn translate_plural_with_params(
   translator: Translator,
   key: String,
@@ -256,18 +394,55 @@ pub fn translate_plural_with_params(
   format_string(template, params)
 }
 
+/// Get the locale from a translator.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(locale) = g18n.locale("en-US")
+/// let translator = g18n.translator(locale, g18n.translations())
+/// g18n.get_locale(translator) // Locale(language: "en", region: Some("US"))
+/// ```
 pub fn get_locale(translator: Translator) -> Locale {
   translator.locale
 }
 
+/// Get the fallback locale from a translator, if set.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en) = g18n.locale("en")
+/// let assert Ok(es) = g18n.locale("es")
+/// let translator = g18n.translator(es, g18n.translations())
+///   |> g18n.with_fallback(en, g18n.translations())
+/// g18n.get_fallback_locale(translator) // Some(Locale(language: "en", region: None))
+/// ```
 pub fn get_fallback_locale(translator: Translator) -> Option(Locale) {
   translator.fallback_locale
 }
 
+/// Get the translations from a translator.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+/// let translator = g18n.translator(g18n.locale("en"), translations)
+/// g18n.get_translations(translator) // Returns the translations container
+/// ```
 pub fn get_translations(translator: Translator) -> Translations {
   translator.translations
 }
 
+/// Get the fallback translations from a translator, if set.
+///
+/// ## Examples
+/// ```gleam
+/// let en_translations = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+/// let translator = g18n.translator(g18n.locale("es"), g18n.translations())
+///   |> g18n.with_fallback(g18n.locale("en"), en_translations)
+/// g18n.get_fallback_translations(translator) // Some(translations)
+/// ```
 pub fn get_fallback_translations(translator: Translator) -> Option(Translations) {
   translator.fallback_translations
 }
@@ -289,10 +464,29 @@ fn get_fallback_translation(
 }
 
 // Translation Management
+/// Create a new empty translations container.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+///   |> g18n.add_translation("goodbye", "Goodbye")
+/// ```
 pub fn translations() -> Translations {
   trie.new()
 }
 
+/// Add a translation key-value pair to a translations container.
+///
+/// Supports hierarchical keys using dot notation for organization.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_translation("user.name", "Name")
+/// ```
 pub fn add_translation(
   translations: Translations,
   key: String,
@@ -302,7 +496,20 @@ pub fn add_translation(
   trie.insert(translations, key_parts, value)
 }
 
-// Get all keys with a common prefix (useful for namespaces)
+/// Get all translation keys that start with a given prefix.
+///
+/// Useful for finding all keys within a specific namespace.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_translation("user.name", "Name")
+/// 
+/// g18n.get_keys_with_prefix(translations, "ui.button")
+/// // ["ui.button.save", "ui.button.cancel"]
+/// ```
 pub fn get_keys_with_prefix(
   translations: Translations,
   prefix: String,
@@ -318,7 +525,21 @@ pub fn get_keys_with_prefix(
   |> list.reverse
 }
 
-// Get all translations in a namespace
+/// Get all key-value pairs from translations within a specific namespace.
+///
+/// Returns tuples of (key, translation) for all keys that start with the namespace prefix.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_translation("user.name", "Name")
+/// let translator = g18n.translator(g18n.locale("en"), translations)
+/// 
+/// g18n.get_namespace(translator, "ui.button")
+/// // [#("ui.button.save", "Save"), #("ui.button.cancel", "Cancel")]
+/// ```
 pub fn get_namespace(
   translator: Translator,
   namespace: String,
@@ -346,10 +567,28 @@ fn has_prefix(key_parts: List(String), prefix_parts: List(String)) -> Bool {
 }
 
 // Format Functions
+/// Create a new empty parameter container for string formatting.
+///
+/// ## Examples
+/// ```gleam
+/// let params = g18n.format_params()
+///   |> g18n.add_param("name", "Alice")
+///   |> g18n.add_param("count", "5")
+/// ```
 pub fn format_params() -> FormatParams {
   dict.new()
 }
 
+/// Add a parameter key-value pair to a format parameters container.
+///
+/// Used for template substitution in translations.
+///
+/// ## Examples
+/// ```gleam
+/// let params = g18n.format_params()
+///   |> g18n.add_param("user", "Alice")
+///   |> g18n.add_param("item_count", "3")
+/// ```
 pub fn add_param(
   params: FormatParams,
   key: String,
@@ -358,12 +597,34 @@ pub fn add_param(
   dict.insert(params, key, value)
 }
 
+/// Perform parameter substitution in a template string.
+///
+/// Replaces {param} placeholders with actual values from the parameters.
+///
+/// ## Examples
+/// ```gleam
+/// let params = g18n.format_params()
+///   |> g18n.add_param("name", "Alice")
+///   |> g18n.add_param("count", "5")
+/// 
+/// g18n.format_string("Hello {name}, you have {count} messages", params)
+/// // "Hello Alice, you have 5 messages"
+/// ```
 pub fn format_string(template: String, params: FormatParams) -> String {
   dict.fold(params, template, fn(acc, key, value) {
     string.replace(acc, "{" <> key <> "}", value)
   })
 }
 
+/// Extract all parameter placeholders from a template string.
+///
+/// Returns a list of parameter names found within {braces}.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.extract_placeholders("Hello {name}, you have {count} new {type}")
+/// // ["name", "count", "type"]
+/// ```
 pub fn extract_placeholders(template: String) -> List(String) {
   let assert Ok(placeholder_regex) = regexp.from_string("\\{([^}]+)\\}")
 
@@ -378,6 +639,16 @@ pub fn extract_placeholders(template: String) -> List(String) {
 }
 
 // Plural Functions
+/// Implement English pluralization rules.
+///
+/// Returns One for count=1, Other for all other counts.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.english_plural_rule(1) // One
+/// g18n.english_plural_rule(2) // Other
+/// g18n.english_plural_rule(0) // Other
+/// ```
 pub fn english_plural_rule(count: Int) -> PluralRule {
   case count {
     1 -> One
@@ -385,6 +656,16 @@ pub fn english_plural_rule(count: Int) -> PluralRule {
   }
 }
 
+/// Implement Portuguese pluralization rules.
+///
+/// Returns Zero for count=0, One for count=1, Other for all other counts.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.portuguese_plural_rule(0) // Zero
+/// g18n.portuguese_plural_rule(1) // One
+/// g18n.portuguese_plural_rule(5) // Other
+/// ```
 pub fn portuguese_plural_rule(count: Int) -> PluralRule {
   case count {
     0 -> Zero
@@ -393,6 +674,20 @@ pub fn portuguese_plural_rule(count: Int) -> PluralRule {
   }
 }
 
+/// Implement complex Russian pluralization rules.
+///
+/// Handles Slavic plural forms (One/Few/Many) based on modular arithmetic.
+/// One: ends in 1, but not 11
+/// Few: ends in 2-4, but not 12-14  
+/// Many: all other cases
+///
+/// ## Examples
+/// ```gleam
+/// g18n.russian_plural_rule(1)  // One
+/// g18n.russian_plural_rule(2)  // Few
+/// g18n.russian_plural_rule(5)  // Many
+/// g18n.russian_plural_rule(11) // Many
+/// ```
 pub fn russian_plural_rule(count: Int) -> PluralRule {
   let mod_10 = count % 10
   let mod_100 = count % 100
@@ -404,6 +699,20 @@ pub fn russian_plural_rule(count: Int) -> PluralRule {
   }
 }
 
+/// Generate a pluralized key based on count and plural rules.
+///
+/// Takes a base translation key and appends the appropriate plural suffix
+/// (.zero, .one, .two, .few, .many, .other) based on the count and the 
+/// provided plural rule function.
+///
+/// ## Examples
+/// ```gleam
+/// let en_rule = g18n.get_locale_plural_rule("en")
+/// 
+/// g18n.get_plural_key("item", 1, en_rule)  // "item.one"
+/// g18n.get_plural_key("item", 5, en_rule)  // "item.other"
+/// g18n.get_plural_key("item", 0, en_rule)  // "item.other"
+/// ```
 pub fn get_plural_key(
   base_key: String,
   count: Int,
@@ -420,6 +729,18 @@ pub fn get_plural_key(
   }
 }
 
+/// Get the plural rule function for a specific language.
+///
+/// Returns the appropriate pluralization rule function based on the language code.
+/// Supports English ("en"), Portuguese ("pt"), and Russian ("ru") rules.
+/// Defaults to English rules for unsupported languages.
+///
+/// ## Examples
+/// ```gleam
+/// let en_rule = g18n.get_locale_plural_rule("en")
+/// let pt_rule = g18n.get_locale_plural_rule("pt") 
+/// let fallback_rule = g18n.get_locale_plural_rule("unknown")  // Uses English rules
+/// ```
 pub fn get_locale_plural_rule(language: String) -> PluralRules {
   case language {
     "en" -> english_plural_rule
@@ -430,6 +751,19 @@ pub fn get_locale_plural_rule(language: String) -> PluralRules {
 }
 
 // Advanced Pluralization Functions
+
+/// Translate with cardinal pluralization rules.
+///
+/// Alias for `translate_plural` that explicitly indicates the use of cardinal
+/// number rules (used for counting: 1 item, 2 items, etc.). This is the
+/// standard pluralization used for most counting scenarios.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.translate_cardinal(en_translator, "book", 1)   // "book.one" 
+/// g18n.translate_cardinal(en_translator, "book", 3)   // "book.other"
+/// g18n.translate_cardinal(pt_translator, "livro", 0)  // "livro.zero" 
+/// ```
 pub fn translate_cardinal(
   translator: Translator,
   key: String,
@@ -438,6 +772,19 @@ pub fn translate_cardinal(
   translate_plural(translator, key, count)
 }
 
+/// Translate with ordinal number rules.
+///
+/// Uses ordinal pluralization rules for position-based numbers (1st, 2nd, 3rd, etc.).
+/// Different languages have different rules for ordinal endings, and this function
+/// applies the appropriate ordinal key suffix based on the position and locale.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.translate_ordinal(en_translator, "place", 1)   // "place.one" → "1st place"
+/// g18n.translate_ordinal(en_translator, "place", 2)   // "place.two" → "2nd place"  
+/// g18n.translate_ordinal(en_translator, "place", 3)   // "place.few" → "3rd place"
+/// g18n.translate_ordinal(en_translator, "place", 11)  // "place.other" → "11th place"
+/// ```
 pub fn translate_ordinal(
   translator: Translator,
   key: String,
@@ -449,6 +796,18 @@ pub fn translate_ordinal(
   translate(translator, ordinal_key)
 }
 
+/// Translate for numeric ranges.
+///
+/// Handles translations for numeric ranges, choosing between single value
+/// and range translations. Uses ".single" key suffix when from equals to,
+/// and ".range" suffix for actual ranges.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.translate_range(en_translator, "pages", 5, 5)   // "pages.single" → "Page 5"
+/// g18n.translate_range(en_translator, "pages", 1, 10)  // "pages.range" → "Pages 1-10"
+/// g18n.translate_range(en_translator, "items", 3, 7)   // "items.range" → "Items 3 through 7"
+/// ```
 pub fn translate_range(
   translator: Translator,
   key: String,
@@ -462,6 +821,23 @@ pub fn translate_range(
   translate(translator, range_key)
 }
 
+/// Translate ordinal numbers with parameter substitution.
+///
+/// Combines ordinal number translation with parameter substitution.
+/// Automatically adds `position` and `ordinal` parameters to the provided
+/// parameters for convenient template formatting.
+///
+/// ## Examples
+/// ```gleam
+/// let params = dict.from_list([("name", "Alice")])
+/// 
+/// g18n.translate_ordinal_with_params(en_translator, "winner", 1, params)
+/// // Template: "{name} finished in {position}{ordinal} place" 
+/// // Result: "Alice finished in 1st place"
+/// 
+/// g18n.translate_ordinal_with_params(en_translator, "winner", 3, params)
+/// // Result: "Alice finished in 3rd place"
+/// ```
 pub fn translate_ordinal_with_params(
   translator: Translator,
   key: String,
@@ -479,6 +855,23 @@ pub fn translate_ordinal_with_params(
   format_string(template, enhanced_params)
 }
 
+/// Translate numeric ranges with parameter substitution.
+///
+/// Combines range translation with parameter substitution. Automatically
+/// adds `from`, `to`, and `total` parameters to the provided parameters
+/// for convenient template formatting.
+///
+/// ## Examples  
+/// ```gleam
+/// let params = dict.from_list([("type", "chapters")])
+/// 
+/// g18n.translate_range_with_params(en_translator, "content", 1, 5, params)
+/// // Template: "Reading {type} {from} to {to} ({total} total)"
+/// // Result: "Reading chapters 1 to 5 (5 total)"
+/// 
+/// g18n.translate_range_with_params(en_translator, "content", 3, 3, params) 
+/// // Uses .single key, Result: "Reading chapter 3"
+/// ```
 pub fn translate_range_with_params(
   translator: Translator,
   key: String,
@@ -563,6 +956,49 @@ pub type NumberFormat {
   // 1.2K, 3.4M, 1.2B
 }
 
+/// Format numbers according to locale-specific conventions and format type.
+///
+/// Provides comprehensive number formatting including decimal separators,
+/// thousands separators, currency symbols, percentage formatting, and 
+/// compact notation. Uses proper locale conventions for each language.
+///
+/// ## Format Types
+/// - `Decimal(precision)`: Standard decimal formatting with locale separators
+/// - `Currency(currency_code, precision)`: Currency with appropriate symbols and placement
+/// - `Percentage(precision)`: Percentage formatting with locale conventions
+/// - `Scientific(precision)`: Scientific notation (simplified)
+/// - `Compact`: Compact notation (1.5K, 2.3M, 1.2B)
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en_locale) = g18n.locale("en")
+/// let assert Ok(de_locale) = g18n.locale("de")
+/// let translations = g18n.translations()
+/// let en_translator = g18n.translator(en_locale, translations)
+/// let de_translator = g18n.translator(de_locale, translations)
+/// 
+/// // Decimal formatting (locale-aware separators)
+/// g18n.format_number(en_translator, 1234.56, g18n.Decimal(2))
+/// // "1234.56" (English uses . for decimal)
+/// g18n.format_number(de_translator, 1234.56, g18n.Decimal(2))
+/// // "1234,56" (German uses , for decimal)
+/// 
+/// // Currency formatting  
+/// g18n.format_number(en_translator, 29.99, g18n.Currency("USD", 2))
+/// // "$29.99"
+/// g18n.format_number(de_translator, 29.99, g18n.Currency("EUR", 2))
+/// // "29.99 €" (German places currency after)
+/// 
+/// // Percentage
+/// g18n.format_number(en_translator, 0.75, g18n.Percentage(1))
+/// // "75.0%"
+/// 
+/// // Compact notation
+/// g18n.format_number(en_translator, 1500000.0, g18n.Compact)
+/// // "1.5M"
+/// g18n.format_number(en_translator, 2500.0, g18n.Compact)  
+/// // "2.5K"
+/// ```
 pub fn format_number(
   translator: Translator,
   number: Float,
@@ -579,6 +1015,14 @@ pub fn format_number(
   }
 }
 
+/// Format a number as a decimal with locale-specific decimal and thousands separators.
+/// 
+/// ## Examples
+/// ```gleam
+/// format_decimal(1234.5678, 2, "en")    // "1,234.57"
+/// format_decimal(1234.5678, 2, "pt")    // "1.234,57"
+/// format_decimal(1000.0, 0, "en")       // "1,000"
+/// ```
 pub fn format_decimal(number: Float, precision: Int, language: String) -> String {
   let decimal_separator = get_decimal_separator(language)
   let thousands_separator = get_thousands_separator(language)
@@ -592,6 +1036,14 @@ pub fn format_decimal(number: Float, precision: Int, language: String) -> String
   )
 }
 
+/// Format a number as currency with locale-specific formatting and currency symbol positioning.
+/// 
+/// ## Examples
+/// ```gleam
+/// format_currency(1234.56, "USD", 2, "en")  // "$1,234.56"
+/// format_currency(1234.56, "EUR", 2, "pt")  // "1.234,56 €"
+/// format_currency(50.0, "GBP", 2, "en")     // "£50.00"
+/// ```
 pub fn format_currency(
   number: Float,
   currency_code: String,
@@ -609,6 +1061,15 @@ pub fn format_currency(
   }
 }
 
+/// Format a decimal number as a percentage with locale-specific formatting.
+/// The input number is multiplied by 100 and formatted with a percent symbol.
+/// 
+/// ## Examples
+/// ```gleam
+/// format_percentage(0.1234, 2, "en")   // "12.34%"
+/// format_percentage(0.75, 1, "fr")     // "75.0 %"
+/// format_percentage(0.5, 0, "en")      // "50%"
+/// ```
 pub fn format_percentage(
   number: Float,
   precision: Int,
@@ -624,6 +1085,14 @@ pub fn format_percentage(
   }
 }
 
+/// Format a number in scientific notation with the specified precision.
+/// Note: This is a simplified implementation that could be enhanced with proper locale support.
+/// 
+/// ## Examples
+/// ```gleam
+/// format_scientific(1234.0, 2)     // "1234.00E+00"
+/// format_scientific(0.00123, 3)    // "0.001E+00"
+/// ```
 pub fn format_scientific(number: Float, precision: Int) -> String {
   // Basic scientific notation - could be enhanced with proper locale support
   let formatted = float.to_precision(number, precision) |> float.to_string
@@ -631,6 +1100,16 @@ pub fn format_scientific(number: Float, precision: Int) -> String {
   // Simplified for now
 }
 
+/// Format large numbers in compact notation using locale-specific suffixes.
+/// Numbers are abbreviated with suffixes like K, M, B for thousands, millions, billions.
+/// 
+/// ## Examples
+/// ```gleam
+/// format_compact(1500.0, "en")           // "1.5K"
+/// format_compact(2500000.0, "en")        // "2.5M"
+/// format_compact(3200000000.0, "en")     // "3.2B"
+/// format_compact(500.0, "en")            // "500"
+/// ```
 pub fn format_compact(number: Float, language: String) -> String {
   case number {
     n if n >=. 1_000_000_000.0 -> {
@@ -752,6 +1231,50 @@ pub type RelativeDuration {
   Years(Int)
 }
 
+/// Format a date according to the translator's locale and specified format.
+/// 
+/// Supports multiple format levels from short numeric formats to full text 
+/// with day-of-week names. Automatically uses locale-appropriate formatting
+/// including proper date separators, month names, and cultural conventions.
+///
+/// ## Supported Languages
+/// English, Spanish, Portuguese, French, German, Italian, Russian, 
+/// Chinese, Japanese, Korean, Arabic, Hindi (with fallback for others)
+///
+/// ## Format Types
+/// - `Short`: Compact numeric format (e.g., "12/25/23", "25/12/23") 
+/// - `Medium`: Month abbreviation (e.g., "Dec 25, 2023", "25 dez 2023")
+/// - `Long`: Full month names with GMT (e.g., "December 25, 2023 GMT")
+/// - `Full`: Complete with day-of-week (e.g., "Monday, December 25, 2023 GMT")
+/// - `Custom(pattern)`: Custom pattern with YYYY, MM, DD placeholders
+///
+/// ## Examples
+/// ```gleam
+/// import gleam/time/calendar
+/// 
+/// let assert Ok(en_locale) = g18n.locale("en")
+/// let assert Ok(pt_locale) = g18n.locale("pt") 
+/// let translations = g18n.translations()
+/// let en_translator = g18n.translator(en_locale, translations)
+/// let pt_translator = g18n.translator(pt_locale, translations)
+/// 
+/// let date = calendar.Date(2024, calendar.January, 15)
+/// 
+/// g18n.format_date(en_translator, date, g18n.Short)
+/// // "01/15/24"
+/// 
+/// g18n.format_date(pt_translator, date, g18n.Short) 
+/// // "15/01/24"
+/// 
+/// g18n.format_date(en_translator, date, g18n.Medium)
+/// // "Jan 15, 2024"
+/// 
+/// g18n.format_date(en_translator, date, g18n.Full)
+/// // "Monday, January 15, 2024 GMT"
+/// 
+/// g18n.format_date(en_translator, date, g18n.Custom("YYYY-MM-DD"))
+/// // "2024-01-15"
+/// ```
 pub fn format_date(
   translator: Translator,
   date: calendar.Date,
@@ -767,6 +1290,39 @@ pub fn format_date(
   }
 }
 
+/// Format a time according to the translator's locale and specified format.
+///
+/// Supports multiple format levels from compact numeric formats to full text
+/// with timezone information. Automatically uses locale-appropriate time formatting
+/// including 12-hour vs 24-hour notation based on cultural conventions.
+///
+/// ## Format Types
+/// - `Short`: Compact time format (e.g., "3:45 PM", "15:45")
+/// - `Medium`: Time with seconds (e.g., "3:45:30 PM", "15:45:30")
+/// - `Long`: Time with timezone (e.g., "3:45:30 PM GMT", "15:45:30 GMT")
+/// - `Full`: Complete time format (e.g., "3:45:30 PM GMT", "15:45:30 GMT")
+/// - `Custom(pattern)`: Custom pattern with HH, mm, ss placeholders
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en_locale) = g18n.locale("en")
+/// let assert Ok(pt_locale) = g18n.locale("pt")
+/// let en_translator = g18n.translator(en_locale, g18n.translations())
+/// let pt_translator = g18n.translator(pt_locale, g18n.translations())
+/// let time = calendar.TimeOfDay(hours: 15, minutes: 30, seconds: 45)
+///
+/// // English uses 12-hour format
+/// g18n.format_time(en_translator, time, g18n.Short)  // "3:30 PM"
+/// g18n.format_time(en_translator, time, g18n.Medium) // "3:30:45 PM"
+/// g18n.format_time(en_translator, time, g18n.Long)   // "3:30:45 PM GMT"
+///
+/// // Portuguese uses 24-hour format  
+/// g18n.format_time(pt_translator, time, g18n.Short)  // "15:30"
+/// g18n.format_time(pt_translator, time, g18n.Medium) // "15:30:45"
+///
+/// // Custom formatting
+/// g18n.format_time(en_translator, time, g18n.Custom("HH:mm")) // "15:30"
+/// ```
 pub fn format_time(
   translator: Translator,
   time: calendar.TimeOfDay,
@@ -782,6 +1338,49 @@ pub fn format_time(
   }
 }
 
+/// Format a date and time together according to the translator's locale and specified format.
+///
+/// Combines date and time formatting into a single localized string, using appropriate
+/// separators and conventions for each language. Supports all format levels from
+/// compact numeric formats to full descriptive text.
+///
+/// ## Format Types
+/// - `Short`: Compact format (e.g., "12/25/23, 3:45 PM", "25/12/23, 15:45")
+/// - `Medium`: Readable format (e.g., "Dec 25, 2023, 3:45:30 PM", "25 dez 2023, 15:45:30")
+/// - `Long`: Full format with timezone (e.g., "December 25, 2023, 3:45:30 PM GMT")
+/// - `Full`: Complete descriptive format (e.g., "Monday, December 25, 2023, 3:45:30 PM GMT")
+/// - `Custom(pattern)`: Custom pattern combining date and time placeholders
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en_locale) = g18n.locale("en")
+/// let assert Ok(pt_locale) = g18n.locale("pt")
+/// let en_translator = g18n.translator(en_locale, g18n.translations())
+/// let pt_translator = g18n.translator(pt_locale, g18n.translations())
+/// let date = calendar.Date(year: 2023, month: calendar.December, day: 25)
+/// let time = calendar.TimeOfDay(hours: 15, minutes: 30, seconds: 0)
+///
+/// // English formatting
+/// g18n.format_datetime(en_translator, date, time, g18n.Short)
+/// // "12/25/23, 3:30 PM"
+///
+/// g18n.format_datetime(en_translator, date, time, g18n.Medium)
+/// // "Dec 25, 2023, 3:30:00 PM"
+///
+/// g18n.format_datetime(en_translator, date, time, g18n.Long)
+/// // "December 25, 2023, 3:30:00 PM GMT"
+///
+/// // Portuguese formatting
+/// g18n.format_datetime(pt_translator, date, time, g18n.Short)
+/// // "25/12/23, 15:30"
+///
+/// g18n.format_datetime(pt_translator, date, time, g18n.Medium) 
+/// // "25 dez 2023, 15:30:00"
+///
+/// // Custom formatting
+/// g18n.format_datetime(en_translator, date, time, g18n.Custom("YYYY-MM-DD HH:mm"))
+/// // "2023-12-25 15:30"
+/// ```
 pub fn format_datetime(
   translator: Translator,
   date: calendar.Date,
@@ -803,6 +1402,54 @@ pub type TimeRelative {
   Future
 }
 
+/// Format relative time expressions like "2 hours ago" or "in 5 minutes".
+///
+/// Generates culturally appropriate relative time expressions using proper
+/// pluralization rules and language-specific constructions. Supports past
+/// and future expressions in 12 languages.
+///
+/// ## Supported Languages & Expressions
+/// - **English**: "2 hours ago", "in 5 minutes"
+/// - **Spanish**: "hace 2 horas", "en 5 minutos"  
+/// - **Portuguese**: "há 2 horas", "em 5 minutos"
+/// - **French**: "il y a 2 heures", "dans 5 minutes"
+/// - **German**: "vor 2 Stunden", "in 5 Minuten"
+/// - **Russian**: "2 часа назад", "через 5 минут" (with complex pluralization)
+/// - **Chinese**: "2小时前", "5分钟后" (no pluralization)
+/// - **Japanese**: "2時間前", "5分後"
+/// - **Korean**: "2시간 전", "5분 후"
+/// - **Arabic**: "منذ ساعتان", "خلال 5 دقائق" (dual/plural forms)
+/// - **Hindi**: "2 घंटे पहले", "5 मिनट में"
+/// - **Italian**: "2 ore fa", "tra 5 minuti"
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en_locale) = g18n.locale("en")
+/// let assert Ok(es_locale) = g18n.locale("es")
+/// let assert Ok(ru_locale) = g18n.locale("ru")
+/// let translations = g18n.translations()
+/// let en_translator = g18n.translator(en_locale, translations)
+/// let es_translator = g18n.translator(es_locale, translations) 
+/// let ru_translator = g18n.translator(ru_locale, translations)
+/// 
+/// // English
+/// g18n.format_relative_time(en_translator, g18n.Hours(2), g18n.Past)
+/// // "2 hours ago"
+/// g18n.format_relative_time(en_translator, g18n.Minutes(30), g18n.Future)
+/// // "in 30 minutes"
+/// 
+/// // Spanish  
+/// g18n.format_relative_time(es_translator, g18n.Days(3), g18n.Past)
+/// // "hace 3 días"
+/// 
+/// // Russian (complex pluralization)
+/// g18n.format_relative_time(ru_translator, g18n.Hours(1), g18n.Past) 
+/// // "1 час назад"
+/// g18n.format_relative_time(ru_translator, g18n.Hours(2), g18n.Past)
+/// // "2 часа назад"  
+/// g18n.format_relative_time(ru_translator, g18n.Hours(5), g18n.Past)
+/// // "5 часов назад"
+/// ```
 pub fn format_relative_time(
   translator: Translator,
   duration: RelativeDuration,
@@ -849,7 +1496,8 @@ pub fn format_relative_time(
     Future, "ar" -> "خلال " <> unit_text
     Past, "hi" -> unit_text <> " पहले"
     Future, "hi" -> unit_text <> " में"
-    _, _ -> unit_text <> " ago"  // Default fallback
+    _, _ -> unit_text <> " ago"
+    // Default fallback
   }
 }
 
@@ -1944,14 +2592,22 @@ fn calculate_day_of_week(date: calendar.Date) -> Int {
   // Convert to our format: Sunday=0, Monday=1, Tuesday=2, etc.
   let day_zeller = { { zeller % 7 } + 7 } % 7
   case day_zeller {
-    0 -> 6  // Saturday -> 6
-    1 -> 0  // Sunday -> 0  
-    2 -> 1  // Monday -> 1
-    3 -> 2  // Tuesday -> 2
-    4 -> 3  // Wednesday -> 3
-    5 -> 4  // Thursday -> 4
-    6 -> 5  // Friday -> 5
-    _ -> 0  // Fallback
+    0 -> 6
+    // Saturday -> 6
+    1 -> 0
+    // Sunday -> 0  
+    2 -> 1
+    // Monday -> 1
+    3 -> 2
+    // Tuesday -> 2
+    4 -> 3
+    // Wednesday -> 3
+    5 -> 4
+    // Thursday -> 4
+    6 -> 5
+    // Friday -> 5
+    _ -> 0
+    // Fallback
   }
 }
 
@@ -1974,6 +2630,32 @@ pub type ValidationReport {
   )
 }
 
+/// Validate target translations against primary translations.
+///
+/// Compares a primary set of translations (e.g., English) with target translations
+/// (e.g., Spanish) to identify missing translations, parameter mismatches, invalid
+/// plural forms, and empty translations. Returns a comprehensive validation report
+/// with error details and translation coverage statistics.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en) = g18n.locale("en")
+/// let assert Ok(es) = g18n.locale("es")
+/// 
+/// let primary = g18n.translations()
+///   |> g18n.add_translation("welcome", "Welcome {name}!")
+///   |> g18n.add_translation("items.one", "1 item")
+///   |> g18n.add_translation("items.other", "{count} items")
+/// 
+/// let target = g18n.translations()
+///   |> g18n.add_translation("welcome", "¡Bienvenido {nombre}!")  // Parameter mismatch
+///   |> g18n.add_translation("items.one", "1 artículo")
+///   // Missing "items.other" translation
+/// 
+/// let report = g18n.validate_translations(primary, target, es)
+/// // report.errors will contain MissingParameter and MissingTranslation errors
+/// // report.coverage will be 0.67 (2 out of 3 keys translated)
+/// ```
 pub fn validate_translations(
   primary_translations: Translations,
   target_translations: Translations,
@@ -2016,6 +2698,30 @@ pub fn validate_translations(
   )
 }
 
+/// Validate that a translation key has the correct parameters.
+///
+/// Checks if a specific translation contains all required parameters and
+/// identifies any unused parameters. This ensures parameter consistency
+/// between different language versions of the same translation.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(locale) = g18n.locale("es")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("user.greeting", "Hola {nombre}!")
+///   |> g18n.add_translation("user.stats", "Tienes {points} puntos")
+/// 
+/// // Check if Spanish translation has required English parameters
+/// let errors1 = g18n.validate_translation_parameters(
+///   translations, "user.greeting", ["name"], locale
+/// )
+/// // Returns [MissingParameter("user.greeting", "name", locale)] - "name" missing, "nombre" unused
+/// 
+/// let errors2 = g18n.validate_translation_parameters(
+///   translations, "user.stats", ["points"], locale  
+/// )
+/// // Returns [] - parameters match correctly
+/// ```
 pub fn validate_translation_parameters(
   translations: Translations,
   key: String,
@@ -2046,6 +2752,33 @@ pub fn validate_translation_parameters(
   }
 }
 
+/// Calculate translation coverage percentage.
+///
+/// Computes the percentage of primary translation keys that have been
+/// translated in the target translations. Returns a float between 0.0 and 1.0
+/// where 1.0 indicates complete coverage (100%).
+///
+/// ## Examples
+/// ```gleam
+/// let primary = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+///   |> g18n.add_translation("goodbye", "Goodbye")
+///   |> g18n.add_translation("welcome", "Welcome")
+/// 
+/// let partial_target = g18n.translations()
+///   |> g18n.add_translation("hello", "Hola")
+///   |> g18n.add_translation("goodbye", "Adiós")
+///   // Missing "welcome" translation
+/// 
+/// let coverage = g18n.get_translation_coverage(primary, partial_target)
+/// // coverage == 0.67 (67% - 2 out of 3 keys translated)
+/// 
+/// let complete_target = partial_target
+///   |> g18n.add_translation("welcome", "Bienvenido")
+/// 
+/// let full_coverage = g18n.get_translation_coverage(primary, complete_target)
+/// // full_coverage == 1.0 (100% coverage)
+/// ```
 pub fn get_translation_coverage(
   primary_translations: Translations,
   target_translations: Translations,
@@ -2059,6 +2792,31 @@ pub fn get_translation_coverage(
   }
 }
 
+/// Find translation keys that are not being used in the application.
+///
+/// Compares all available translation keys against a list of keys actually used
+/// in the application code. Returns keys that exist in translations but are not
+/// referenced, helping identify obsolete translations that can be removed.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("common.save", "Save")
+///   |> g18n.add_translation("common.cancel", "Cancel")
+///   |> g18n.add_translation("old.feature", "Old Feature")
+///   |> g18n.add_translation("user.profile", "Profile")
+/// 
+/// // Keys actually used in application code
+/// let used_keys = ["common.save", "common.cancel", "user.profile"]
+/// 
+/// let unused = g18n.find_unused_translations(translations, used_keys)
+/// // unused == ["old.feature"] - this key exists but is not used
+/// 
+/// // If all keys are used
+/// let all_used = ["common.save", "common.cancel", "old.feature", "user.profile"]
+/// let no_unused = g18n.find_unused_translations(translations, all_used)
+/// // no_unused == [] - all translation keys are being used
+/// ```
 pub fn find_unused_translations(
   translations: Translations,
   used_keys: List(String),
@@ -2067,6 +2825,41 @@ pub fn find_unused_translations(
   list.filter(all_keys, fn(key) { !list.contains(used_keys, key) })
 }
 
+/// Export a validation report to a formatted string.
+///
+/// Converts a ValidationReport into a human-readable text format suitable
+/// for display in console output, log files, or CI/CD reports. Includes
+/// coverage statistics, error counts, and detailed error descriptions.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en) = g18n.locale("en")
+/// let assert Ok(es) = g18n.locale("es")
+/// 
+/// let primary = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello {name}!")
+///   |> g18n.add_translation("goodbye", "Goodbye")
+/// 
+/// let target = g18n.translations()
+///   |> g18n.add_translation("hello", "Hola {nombre}!")  // Parameter mismatch
+///   // Missing "goodbye" translation
+/// 
+/// let report = g18n.validate_translations(primary, target, es)
+/// let formatted = g18n.export_validation_report(report)
+/// 
+/// // formatted contains:
+/// // "Translation Validation Report"
+/// // "================================"
+/// // "Coverage: 50.0%"
+/// // "Total Keys: 2"
+/// // "Translated: 1" 
+/// // "Errors: 2"
+/// // "Warnings: 0"
+/// // 
+/// // "ERRORS:"
+/// // "Missing translation: 'goodbye' for locale es"
+/// // "Missing parameter: 'name' in 'hello' for locale es"
+/// ```
 pub fn export_validation_report(report: ValidationReport) -> String {
   let error_count = list.length(report.errors)
   let warning_count = list.length(report.warnings)
@@ -2274,6 +3067,19 @@ fn format_validation_errors(errors: List(ValidationError)) -> String {
 }
 
 // JSON Loading Functions
+
+/// Parse a JSON string into a Translations structure.
+/// 
+/// Converts a JSON object with dotted keys into an internal trie structure
+/// for efficient translation lookups. The JSON should contain key-value pairs
+/// where keys use dot notation (e.g., "user.name", "welcome.message") and
+/// values are the translation strings.
+/// 
+/// ## Examples
+/// ```gleam
+/// let json = "{\"user.name\": \"Name\", \"user.email\": \"Email\"}"
+/// let assert Ok(translations) = g18n.translations_from_json(json)
+/// ```
 pub fn translations_from_json(
   json_string: String,
 ) -> Result(Translations, String) {
@@ -2292,6 +3098,18 @@ pub fn translations_from_json(
   }
 }
 
+/// Convert a Translations structure to a JSON string.
+/// 
+/// Converts the internal trie structure back to a JSON object with dotted keys.
+/// This is useful for exporting translations or debugging the current state
+/// of loaded translations.
+/// 
+/// ## Examples
+/// ```gleam
+/// let assert Ok(translations) = g18n.translations_from_json("{\"user.name\": \"Name\"}")
+/// let json_output = g18n.translations_to_json(translations)
+/// // Returns: {"user.name": "Name"}
+/// ```
 pub fn translations_to_json(translations: Translations) -> String {
   // Convert trie to dict for JSON serialization
   let dict_translations =
@@ -2327,6 +3145,24 @@ fn list_filter(list: List(a), predicate: fn(a) -> Bool) -> List(a) {
   }
 }
 
+/// Main entry point for the g18n CLI tool.
+/// 
+/// Handles command-line arguments and dispatches to appropriate command handlers.
+/// Currently supports 'generate' command to create Gleam translation modules
+/// and 'help' command to display usage information.
+/// 
+/// ## Supported Commands
+/// - `generate`: Generate Gleam modules from translation JSON files
+/// - `help`: Display help information
+/// - No arguments: Display help information
+/// 
+/// ## Examples
+/// Run via command line:
+/// ```bash
+/// gleam run generate  # Generate translation modules
+/// gleam run help      # Show help
+/// gleam run           # Show help (default)
+/// ```
 pub fn main() {
   case argv.load().arguments {
     ["generate"] -> generate_command()

@@ -1,6 +1,7 @@
 import g18n
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/time/calendar
 import gleeunit
 
@@ -411,47 +412,59 @@ pub fn multi_language_date_formatting_test() {
   let en_translator = g18n.translator(en_locale, translations)
   assert "01/01/24" == g18n.format_date(en_translator, date, g18n.Short)
   assert "Jan 1, 2024" == g18n.format_date(en_translator, date, g18n.Medium)
-  assert "January 1, 2024 GMT" == g18n.format_date(en_translator, date, g18n.Long)
+  assert "January 1, 2024 GMT"
+    == g18n.format_date(en_translator, date, g18n.Long)
 
   // Spanish
   let assert Ok(es_locale) = g18n.locale("es")
   let es_translator = g18n.translator(es_locale, translations)
   assert "01/01/24" == g18n.format_date(es_translator, date, g18n.Short)
-  assert "1 de ene de 2024" == g18n.format_date(es_translator, date, g18n.Medium)
-  assert "1 de enero de 2024 GMT" == g18n.format_date(es_translator, date, g18n.Long)
-  assert "lunes, 1 de enero de 2024 GMT" == g18n.format_date(es_translator, date, g18n.Full)
+  assert "1 de ene de 2024"
+    == g18n.format_date(es_translator, date, g18n.Medium)
+  assert "1 de enero de 2024 GMT"
+    == g18n.format_date(es_translator, date, g18n.Long)
+  assert "lunes, 1 de enero de 2024 GMT"
+    == g18n.format_date(es_translator, date, g18n.Full)
 
   // French
   let assert Ok(fr_locale) = g18n.locale("fr")
   let fr_translator = g18n.translator(fr_locale, translations)
   assert "01/01/24" == g18n.format_date(fr_translator, date, g18n.Short)
   assert "1 janv 2024" == g18n.format_date(fr_translator, date, g18n.Medium)
-  assert "1 janvier 2024 GMT" == g18n.format_date(fr_translator, date, g18n.Long)
-  assert "lundi 1 janvier 2024 GMT" == g18n.format_date(fr_translator, date, g18n.Full)
+  assert "1 janvier 2024 GMT"
+    == g18n.format_date(fr_translator, date, g18n.Long)
+  assert "lundi 1 janvier 2024 GMT"
+    == g18n.format_date(fr_translator, date, g18n.Full)
 
   // German
   let assert Ok(de_locale) = g18n.locale("de")
   let de_translator = g18n.translator(de_locale, translations)
   assert "01.01.24" == g18n.format_date(de_translator, date, g18n.Short)
   assert "1. Jan 2024" == g18n.format_date(de_translator, date, g18n.Medium)
-  assert "1. Januar 2024 GMT" == g18n.format_date(de_translator, date, g18n.Long)
-  assert "Montag, 1. Januar 2024 GMT" == g18n.format_date(de_translator, date, g18n.Full)
+  assert "1. Januar 2024 GMT"
+    == g18n.format_date(de_translator, date, g18n.Long)
+  assert "Montag, 1. Januar 2024 GMT"
+    == g18n.format_date(de_translator, date, g18n.Full)
 
   // Italian
   let assert Ok(it_locale) = g18n.locale("it")
   let it_translator = g18n.translator(it_locale, translations)
   assert "01/01/24" == g18n.format_date(it_translator, date, g18n.Short)
   assert "1 gen 2024" == g18n.format_date(it_translator, date, g18n.Medium)
-  assert "1 gennaio 2024 GMT" == g18n.format_date(it_translator, date, g18n.Long)
-  assert "lunedì, 1 gennaio 2024 GMT" == g18n.format_date(it_translator, date, g18n.Full)
+  assert "1 gennaio 2024 GMT"
+    == g18n.format_date(it_translator, date, g18n.Long)
+  assert "lunedì, 1 gennaio 2024 GMT"
+    == g18n.format_date(it_translator, date, g18n.Full)
 
   // Russian
   let assert Ok(ru_locale) = g18n.locale("ru")
   let ru_translator = g18n.translator(ru_locale, translations)
   assert "01.01.24" == g18n.format_date(ru_translator, date, g18n.Short)
   assert "1 янв 2024 г." == g18n.format_date(ru_translator, date, g18n.Medium)
-  assert "1 январь 2024 г. GMT" == g18n.format_date(ru_translator, date, g18n.Long)
-  assert "понедельник, 1 январь 2024 г. GMT" == g18n.format_date(ru_translator, date, g18n.Full)
+  assert "1 январь 2024 г. GMT"
+    == g18n.format_date(ru_translator, date, g18n.Long)
+  assert "понедельник, 1 январь 2024 г. GMT"
+    == g18n.format_date(ru_translator, date, g18n.Full)
 }
 
 pub fn asian_languages_date_formatting_test() {
@@ -480,7 +493,8 @@ pub fn asian_languages_date_formatting_test() {
   assert "24/03/15" == g18n.format_date(ko_translator, date, g18n.Short)
   assert "2024년 3월 15일" == g18n.format_date(ko_translator, date, g18n.Medium)
   assert "2024년 삼월 15일 GMT" == g18n.format_date(ko_translator, date, g18n.Long)
-  assert "2024년 삼월 15일 금요일 GMT" == g18n.format_date(ko_translator, date, g18n.Full)
+  assert "2024년 삼월 15일 금요일 GMT"
+    == g18n.format_date(ko_translator, date, g18n.Full)
 }
 
 pub fn day_of_week_calculation_test() {
@@ -491,30 +505,36 @@ pub fn day_of_week_calculation_test() {
   // Test known dates with their correct day of week
   // January 1, 2024 was a Monday
   let monday_date = calendar.Date(2024, calendar.January, 1)
-  
+
   // December 25, 2023 was a Monday
   let christmas_2023 = calendar.Date(2023, calendar.December, 25)
-  
+
   // July 4, 2024 was a Thursday
   let july_4th = calendar.Date(2024, calendar.July, 4)
 
   // February 29, 2024 was a Thursday (leap year)
   let leap_day = calendar.Date(2024, calendar.February, 29)
-  
+
   // Test with the correct assertions
-  assert "Monday, January 1, 2024 GMT" == g18n.format_date(en_translator, monday_date, g18n.Full)
-  assert "Monday, December 25, 2023 GMT" == g18n.format_date(en_translator, christmas_2023, g18n.Full)
-  assert "Thursday, July 4, 2024 GMT" == g18n.format_date(en_translator, july_4th, g18n.Full)
-  assert "Thursday, February 29, 2024 GMT" == g18n.format_date(en_translator, leap_day, g18n.Full)
+  assert "Monday, January 1, 2024 GMT"
+    == g18n.format_date(en_translator, monday_date, g18n.Full)
+  assert "Monday, December 25, 2023 GMT"
+    == g18n.format_date(en_translator, christmas_2023, g18n.Full)
+  assert "Thursday, July 4, 2024 GMT"
+    == g18n.format_date(en_translator, july_4th, g18n.Full)
+  assert "Thursday, February 29, 2024 GMT"
+    == g18n.format_date(en_translator, leap_day, g18n.Full)
 
   // Test in different languages for same date
   let assert Ok(pt_locale) = g18n.locale("pt")
   let pt_translator = g18n.translator(pt_locale, translations)
-  assert "segunda-feira, 1 de janeiro de 2024 GMT" == g18n.format_date(pt_translator, monday_date, g18n.Full)
+  assert "segunda-feira, 1 de janeiro de 2024 GMT"
+    == g18n.format_date(pt_translator, monday_date, g18n.Full)
 
   let assert Ok(fr_locale) = g18n.locale("fr")
   let fr_translator = g18n.translator(fr_locale, translations)
-  assert "lundi 1 janvier 2024 GMT" == g18n.format_date(fr_translator, monday_date, g18n.Full)
+  assert "lundi 1 janvier 2024 GMT"
+    == g18n.format_date(fr_translator, monday_date, g18n.Full)
 }
 
 pub fn time_unit_formatting_test() {
@@ -523,76 +543,110 @@ pub fn time_unit_formatting_test() {
   // English
   let assert Ok(en_locale) = g18n.locale("en")
   let en_translator = g18n.translator(en_locale, translations)
-  assert "1 second ago" == g18n.format_relative_time(en_translator, g18n.Seconds(1), g18n.Past)
-  assert "5 minutes ago" == g18n.format_relative_time(en_translator, g18n.Minutes(5), g18n.Past)
-  assert "in 2 hours" == g18n.format_relative_time(en_translator, g18n.Hours(2), g18n.Future)
+  assert "1 second ago"
+    == g18n.format_relative_time(en_translator, g18n.Seconds(1), g18n.Past)
+  assert "5 minutes ago"
+    == g18n.format_relative_time(en_translator, g18n.Minutes(5), g18n.Past)
+  assert "in 2 hours"
+    == g18n.format_relative_time(en_translator, g18n.Hours(2), g18n.Future)
 
   // Spanish
   let assert Ok(es_locale) = g18n.locale("es")
   let es_translator = g18n.translator(es_locale, translations)
-  assert "hace 1 segundo" == g18n.format_relative_time(es_translator, g18n.Seconds(1), g18n.Past)
-  assert "hace 5 minutos" == g18n.format_relative_time(es_translator, g18n.Minutes(5), g18n.Past)
-  assert "en 2 horas" == g18n.format_relative_time(es_translator, g18n.Hours(2), g18n.Future)
+  assert "hace 1 segundo"
+    == g18n.format_relative_time(es_translator, g18n.Seconds(1), g18n.Past)
+  assert "hace 5 minutos"
+    == g18n.format_relative_time(es_translator, g18n.Minutes(5), g18n.Past)
+  assert "en 2 horas"
+    == g18n.format_relative_time(es_translator, g18n.Hours(2), g18n.Future)
 
   // French
   let assert Ok(fr_locale) = g18n.locale("fr")
   let fr_translator = g18n.translator(fr_locale, translations)
-  assert "il y a 1 seconde" == g18n.format_relative_time(fr_translator, g18n.Seconds(1), g18n.Past)
-  assert "il y a 5 minutes" == g18n.format_relative_time(fr_translator, g18n.Minutes(5), g18n.Past)
-  assert "dans 2 heures" == g18n.format_relative_time(fr_translator, g18n.Hours(2), g18n.Future)
+  assert "il y a 1 seconde"
+    == g18n.format_relative_time(fr_translator, g18n.Seconds(1), g18n.Past)
+  assert "il y a 5 minutes"
+    == g18n.format_relative_time(fr_translator, g18n.Minutes(5), g18n.Past)
+  assert "dans 2 heures"
+    == g18n.format_relative_time(fr_translator, g18n.Hours(2), g18n.Future)
 
   // German
   let assert Ok(de_locale) = g18n.locale("de")
   let de_translator = g18n.translator(de_locale, translations)
-  assert "vor 1 Sekunde" == g18n.format_relative_time(de_translator, g18n.Seconds(1), g18n.Past)
-  assert "vor 5 Minuten" == g18n.format_relative_time(de_translator, g18n.Minutes(5), g18n.Past)
-  assert "in 2 Stunden" == g18n.format_relative_time(de_translator, g18n.Hours(2), g18n.Future)
+  assert "vor 1 Sekunde"
+    == g18n.format_relative_time(de_translator, g18n.Seconds(1), g18n.Past)
+  assert "vor 5 Minuten"
+    == g18n.format_relative_time(de_translator, g18n.Minutes(5), g18n.Past)
+  assert "in 2 Stunden"
+    == g18n.format_relative_time(de_translator, g18n.Hours(2), g18n.Future)
 
   // Russian (with complex pluralization)
   let assert Ok(ru_locale) = g18n.locale("ru")
   let ru_translator = g18n.translator(ru_locale, translations)
-  assert "1 секунда назад" == g18n.format_relative_time(ru_translator, g18n.Seconds(1), g18n.Past)
-  assert "2 секунды назад" == g18n.format_relative_time(ru_translator, g18n.Seconds(2), g18n.Past)
-  assert "5 секунд назад" == g18n.format_relative_time(ru_translator, g18n.Seconds(5), g18n.Past)
-  assert "через 1 час" == g18n.format_relative_time(ru_translator, g18n.Hours(1), g18n.Future)
-  assert "через 3 часа" == g18n.format_relative_time(ru_translator, g18n.Hours(3), g18n.Future)
-  assert "через 5 часов" == g18n.format_relative_time(ru_translator, g18n.Hours(5), g18n.Future)
+  assert "1 секунда назад"
+    == g18n.format_relative_time(ru_translator, g18n.Seconds(1), g18n.Past)
+  assert "2 секунды назад"
+    == g18n.format_relative_time(ru_translator, g18n.Seconds(2), g18n.Past)
+  assert "5 секунд назад"
+    == g18n.format_relative_time(ru_translator, g18n.Seconds(5), g18n.Past)
+  assert "через 1 час"
+    == g18n.format_relative_time(ru_translator, g18n.Hours(1), g18n.Future)
+  assert "через 3 часа"
+    == g18n.format_relative_time(ru_translator, g18n.Hours(3), g18n.Future)
+  assert "через 5 часов"
+    == g18n.format_relative_time(ru_translator, g18n.Hours(5), g18n.Future)
 
   // Chinese (no pluralization)
   let assert Ok(zh_locale) = g18n.locale("zh")
   let zh_translator = g18n.translator(zh_locale, translations)
-  assert "1秒前" == g18n.format_relative_time(zh_translator, g18n.Seconds(1), g18n.Past)
-  assert "5分钟前" == g18n.format_relative_time(zh_translator, g18n.Minutes(5), g18n.Past)
-  assert "2小时后" == g18n.format_relative_time(zh_translator, g18n.Hours(2), g18n.Future)
+  assert "1秒前"
+    == g18n.format_relative_time(zh_translator, g18n.Seconds(1), g18n.Past)
+  assert "5分钟前"
+    == g18n.format_relative_time(zh_translator, g18n.Minutes(5), g18n.Past)
+  assert "2小时后"
+    == g18n.format_relative_time(zh_translator, g18n.Hours(2), g18n.Future)
 
   // Japanese
   let assert Ok(ja_locale) = g18n.locale("ja")
   let ja_translator = g18n.translator(ja_locale, translations)
-  assert "1秒前" == g18n.format_relative_time(ja_translator, g18n.Seconds(1), g18n.Past)
-  assert "5分前" == g18n.format_relative_time(ja_translator, g18n.Minutes(5), g18n.Past)
-  assert "2時間後" == g18n.format_relative_time(ja_translator, g18n.Hours(2), g18n.Future)
+  assert "1秒前"
+    == g18n.format_relative_time(ja_translator, g18n.Seconds(1), g18n.Past)
+  assert "5分前"
+    == g18n.format_relative_time(ja_translator, g18n.Minutes(5), g18n.Past)
+  assert "2時間後"
+    == g18n.format_relative_time(ja_translator, g18n.Hours(2), g18n.Future)
 
   // Korean
   let assert Ok(ko_locale) = g18n.locale("ko")
   let ko_translator = g18n.translator(ko_locale, translations)
-  assert "1초 전" == g18n.format_relative_time(ko_translator, g18n.Seconds(1), g18n.Past)
-  assert "5분 전" == g18n.format_relative_time(ko_translator, g18n.Minutes(5), g18n.Past)
-  assert "2시간 후" == g18n.format_relative_time(ko_translator, g18n.Hours(2), g18n.Future)
+  assert "1초 전"
+    == g18n.format_relative_time(ko_translator, g18n.Seconds(1), g18n.Past)
+  assert "5분 전"
+    == g18n.format_relative_time(ko_translator, g18n.Minutes(5), g18n.Past)
+  assert "2시간 후"
+    == g18n.format_relative_time(ko_translator, g18n.Hours(2), g18n.Future)
 
   // Arabic (with complex pluralization)
   let assert Ok(ar_locale) = g18n.locale("ar")
   let ar_translator = g18n.translator(ar_locale, translations)
-  assert "منذ ثانية واحدة" == g18n.format_relative_time(ar_translator, g18n.Seconds(1), g18n.Past)
-  assert "منذ ثانيتان" == g18n.format_relative_time(ar_translator, g18n.Seconds(2), g18n.Past)
-  assert "منذ 3 ثوانٍ" == g18n.format_relative_time(ar_translator, g18n.Seconds(3), g18n.Past)
-  assert "منذ 11 ثانية" == g18n.format_relative_time(ar_translator, g18n.Seconds(11), g18n.Past)
+  assert "منذ ثانية واحدة"
+    == g18n.format_relative_time(ar_translator, g18n.Seconds(1), g18n.Past)
+  assert "منذ ثانيتان"
+    == g18n.format_relative_time(ar_translator, g18n.Seconds(2), g18n.Past)
+  assert "منذ 3 ثوانٍ"
+    == g18n.format_relative_time(ar_translator, g18n.Seconds(3), g18n.Past)
+  assert "منذ 11 ثانية"
+    == g18n.format_relative_time(ar_translator, g18n.Seconds(11), g18n.Past)
 
   // Hindi
   let assert Ok(hi_locale) = g18n.locale("hi")
   let hi_translator = g18n.translator(hi_locale, translations)
-  assert "1 सेकंड पहले" == g18n.format_relative_time(hi_translator, g18n.Seconds(1), g18n.Past)
-  assert "5 मिनट पहले" == g18n.format_relative_time(hi_translator, g18n.Minutes(5), g18n.Past)
-  assert "2 घंटे में" == g18n.format_relative_time(hi_translator, g18n.Hours(2), g18n.Future)
+  assert "1 सेकंड पहले"
+    == g18n.format_relative_time(hi_translator, g18n.Seconds(1), g18n.Past)
+  assert "5 मिनट पहले"
+    == g18n.format_relative_time(hi_translator, g18n.Minutes(5), g18n.Past)
+  assert "2 घंटे में"
+    == g18n.format_relative_time(hi_translator, g18n.Hours(2), g18n.Future)
 }
 
 pub fn month_name_localization_test() {
@@ -604,33 +658,46 @@ pub fn month_name_localization_test() {
   // Test month names in different languages
   let assert Ok(en_locale) = g18n.locale("en")
   let en_translator = g18n.translator(en_locale, translations)
-  assert "Jan 15, 2024" == g18n.format_date(en_translator, date_jan, g18n.Medium)
-  assert "May 15, 2024" == g18n.format_date(en_translator, date_may, g18n.Medium)
-  assert "Dec 15, 2024" == g18n.format_date(en_translator, date_dec, g18n.Medium)
+  assert "Jan 15, 2024"
+    == g18n.format_date(en_translator, date_jan, g18n.Medium)
+  assert "May 15, 2024"
+    == g18n.format_date(en_translator, date_may, g18n.Medium)
+  assert "Dec 15, 2024"
+    == g18n.format_date(en_translator, date_dec, g18n.Medium)
 
   let assert Ok(pt_locale) = g18n.locale("pt")
   let pt_translator = g18n.translator(pt_locale, translations)
-  assert "15 de jan de 2024" == g18n.format_date(pt_translator, date_jan, g18n.Medium)
-  assert "15 de mai de 2024" == g18n.format_date(pt_translator, date_may, g18n.Medium)
-  assert "15 de dez de 2024" == g18n.format_date(pt_translator, date_dec, g18n.Medium)
+  assert "15 de jan de 2024"
+    == g18n.format_date(pt_translator, date_jan, g18n.Medium)
+  assert "15 de mai de 2024"
+    == g18n.format_date(pt_translator, date_may, g18n.Medium)
+  assert "15 de dez de 2024"
+    == g18n.format_date(pt_translator, date_dec, g18n.Medium)
 
   let assert Ok(fr_locale) = g18n.locale("fr")
   let fr_translator = g18n.translator(fr_locale, translations)
-  assert "15 janv 2024" == g18n.format_date(fr_translator, date_jan, g18n.Medium)
+  assert "15 janv 2024"
+    == g18n.format_date(fr_translator, date_jan, g18n.Medium)
   assert "15 mai 2024" == g18n.format_date(fr_translator, date_may, g18n.Medium)
   assert "15 déc 2024" == g18n.format_date(fr_translator, date_dec, g18n.Medium)
 
   let assert Ok(de_locale) = g18n.locale("de")
   let de_translator = g18n.translator(de_locale, translations)
-  assert "15. Jan 2024" == g18n.format_date(de_translator, date_jan, g18n.Medium)
-  assert "15. Mai 2024" == g18n.format_date(de_translator, date_may, g18n.Medium)
-  assert "15. Dez 2024" == g18n.format_date(de_translator, date_dec, g18n.Medium)
+  assert "15. Jan 2024"
+    == g18n.format_date(de_translator, date_jan, g18n.Medium)
+  assert "15. Mai 2024"
+    == g18n.format_date(de_translator, date_may, g18n.Medium)
+  assert "15. Dez 2024"
+    == g18n.format_date(de_translator, date_dec, g18n.Medium)
 
   let assert Ok(ru_locale) = g18n.locale("ru")
   let ru_translator = g18n.translator(ru_locale, translations)
-  assert "15 янв 2024 г." == g18n.format_date(ru_translator, date_jan, g18n.Medium)
-  assert "15 май 2024 г." == g18n.format_date(ru_translator, date_may, g18n.Medium)
-  assert "15 дек 2024 г." == g18n.format_date(ru_translator, date_dec, g18n.Medium)
+  assert "15 янв 2024 г."
+    == g18n.format_date(ru_translator, date_jan, g18n.Medium)
+  assert "15 май 2024 г."
+    == g18n.format_date(ru_translator, date_may, g18n.Medium)
+  assert "15 дек 2024 г."
+    == g18n.format_date(ru_translator, date_dec, g18n.Medium)
 
   // Test Chinese months
   let assert Ok(zh_locale) = g18n.locale("zh")
@@ -641,18 +708,267 @@ pub fn month_name_localization_test() {
 }
 
 pub fn fallback_language_test() {
-  let date = calendar.Date(2024, calendar.June, 1)  // Saturday
+  let date = calendar.Date(2024, calendar.June, 1)
+  // Saturday
   let translations = g18n.translations()
-  
+
   // Test unsupported language falls back to numeric format for months
-  let assert Ok(unsupported_locale) = g18n.locale("xx")  // Unsupported language
+  let assert Ok(unsupported_locale) = g18n.locale("xx")
+  // Unsupported language
   let unsupported_translator = g18n.translator(unsupported_locale, translations)
-  
+
   // Should fall back to default format
-  assert "01-06-24" == g18n.format_date(unsupported_translator, date, g18n.Short)
-  assert "1 06 2024" == g18n.format_date(unsupported_translator, date, g18n.Medium)
-  assert "1 06 2024 GMT" == g18n.format_date(unsupported_translator, date, g18n.Long)
-  
+  assert "01-06-24"
+    == g18n.format_date(unsupported_translator, date, g18n.Short)
+  assert "1 06 2024"
+    == g18n.format_date(unsupported_translator, date, g18n.Medium)
+  assert "1 06 2024 GMT"
+    == g18n.format_date(unsupported_translator, date, g18n.Long)
+
   // June 1, 2024 is a Saturday (day 6), so fallback shows "Day 6"
-  assert "Day 6, 1 06 2024 GMT" == g18n.format_date(unsupported_translator, date, g18n.Full)
+  assert "Day 6, 1 06 2024 GMT"
+    == g18n.format_date(unsupported_translator, date, g18n.Full)
+}
+
+pub fn locale_utility_functions_test() {
+  let assert Ok(en_us_locale) = g18n.locale("en-US")
+  let assert Ok(en_locale) = g18n.locale("en")
+  let assert Ok(pt_br_locale) = g18n.locale("pt-BR")
+
+  // Test locale_language
+  assert "en" == g18n.locale_language(en_us_locale)
+  assert "en" == g18n.locale_language(en_locale)
+  assert "pt" == g18n.locale_language(pt_br_locale)
+
+  // Test locale_region
+  assert g18n.locale_region(en_us_locale) == Some("US")
+  assert g18n.locale_region(en_locale) == None
+  assert g18n.locale_region(pt_br_locale) == Some("BR")
+
+  // Test locales_match_language
+  assert True == g18n.locales_match_language(en_us_locale, en_locale)
+  assert False == g18n.locales_match_language(en_us_locale, pt_br_locale)
+
+  // Test locales_exact_match
+  assert False == g18n.locales_exact_match(en_us_locale, en_locale)
+  assert True == g18n.locales_exact_match(en_us_locale, en_us_locale)
+
+  // Test locale_language_only
+  let en_only = g18n.locale_language_only(en_us_locale)
+  assert "en" == g18n.locale_string(en_only)
+  assert None == g18n.locale_region(en_only)
+}
+
+pub fn translator_accessor_functions_test() {
+  let assert Ok(en_locale) = g18n.locale("en-US")
+  let assert Ok(fallback_locale) = g18n.locale("en")
+  let translations =
+    g18n.translations() |> g18n.add_translation("hello", "Hello")
+  let fallback_translations =
+    g18n.translations() |> g18n.add_translation("goodbye", "Goodbye")
+
+  let translator = g18n.translator(en_locale, translations)
+  let translator_with_fallback =
+    g18n.with_fallback(translator, fallback_locale, fallback_translations)
+
+  // Test get_locale
+  assert "en-US" == g18n.locale_string(g18n.get_locale(translator))
+  assert "en-US"
+    == g18n.locale_string(g18n.get_locale(translator_with_fallback))
+
+  // Test get_fallback_locale
+  assert None == g18n.get_fallback_locale(translator)
+  assert Some(fallback_locale)
+    == g18n.get_fallback_locale(translator_with_fallback)
+
+  // Test get_translations and get_fallback_translations
+  let main_trans = g18n.get_translations(translator_with_fallback)
+  let fallback_trans = g18n.get_fallback_translations(translator_with_fallback)
+
+  assert "Hello"
+    == g18n.translate(g18n.translator(en_locale, main_trans), "hello")
+  // Test fallback translations exist and work correctly
+  let assert Some(fb_trans) = fallback_trans
+  assert "Goodbye"
+    == g18n.translate(g18n.translator(fallback_locale, fb_trans), "goodbye")
+}
+
+pub fn string_formatting_functions_test() {
+  // Test format_string
+  let template = "Hello {name}, you have {count} messages"
+  let params =
+    g18n.format_params()
+    |> g18n.add_param("name", "Alice")
+    |> g18n.add_param("count", "5")
+
+  assert "Hello Alice, you have 5 messages"
+    == g18n.format_string(template, params)
+
+  // Test extract_placeholders
+  let placeholders = g18n.extract_placeholders(template)
+  assert ["name", "count"] == placeholders
+
+  let complex_template = "Welcome {user} to {app} version {version}"
+  let complex_placeholders = g18n.extract_placeholders(complex_template)
+  assert ["user", "app", "version"] == complex_placeholders
+
+  // Test empty template
+  let empty_placeholders = g18n.extract_placeholders("No placeholders here")
+  assert [] == empty_placeholders
+}
+
+pub fn plural_rule_functions_test() {
+  // Test individual plural rule functions
+  assert g18n.One == g18n.english_plural_rule(1)
+  assert g18n.Other == g18n.english_plural_rule(0)
+  assert g18n.Other == g18n.english_plural_rule(2)
+
+  assert g18n.Zero == g18n.portuguese_plural_rule(0)
+  assert g18n.One == g18n.portuguese_plural_rule(1)
+  assert g18n.Other == g18n.portuguese_plural_rule(2)
+
+  assert g18n.One == g18n.russian_plural_rule(1)
+  assert g18n.Few == g18n.russian_plural_rule(2)
+  assert g18n.Few == g18n.russian_plural_rule(3)
+  assert g18n.Few == g18n.russian_plural_rule(4)
+  assert g18n.Many == g18n.russian_plural_rule(5)
+  assert g18n.Many == g18n.russian_plural_rule(11)
+
+  // Test get_plural_key
+  let en_rule = g18n.get_locale_plural_rule("en")
+  assert "item.one" == g18n.get_plural_key("item", 1, en_rule)
+  assert "item.other" == g18n.get_plural_key("item", 5, en_rule)
+
+  let pt_rule = g18n.get_locale_plural_rule("pt")
+  assert "item.zero" == g18n.get_plural_key("item", 0, pt_rule)
+  assert "item.one" == g18n.get_plural_key("item", 1, pt_rule)
+  assert "item.other" == g18n.get_plural_key("item", 3, pt_rule)
+
+  // Test get_locale_plural_rule
+  let unknown_rule = g18n.get_locale_plural_rule("unknown")
+  assert g18n.One == unknown_rule(1)
+  assert g18n.Other == unknown_rule(5)
+}
+
+pub fn individual_number_formatting_test() {
+  // Test individual format functions
+  assert "1234.56" == g18n.format_decimal(1234.56, 2, "en")
+
+  assert "$29.99" == g18n.format_currency(29.99, "USD", 2, "en")
+  assert "R$29.99" == g18n.format_currency(29.99, "BRL", 2, "pt")
+
+  assert "75.0%" == g18n.format_percentage(0.75, 1, "en")
+
+  assert "1.23E+00" == g18n.format_scientific(1.234, 2)
+
+  assert "1.5M" == g18n.format_compact(1_500_000.0, "en")
+  assert "2.5K" == g18n.format_compact(2500.0, "en")
+}
+
+pub fn time_and_datetime_formatting_test() {
+  let assert Ok(en_locale) = g18n.locale("en")
+  let assert Ok(pt_locale) = g18n.locale("pt")
+  let translations = g18n.translations()
+  let en_translator = g18n.translator(en_locale, translations)
+  let pt_translator = g18n.translator(pt_locale, translations)
+
+  let time = calendar.TimeOfDay(14, 30, 45, 0)
+  let date = calendar.Date(2024, calendar.January, 15)
+
+  // Test format_time
+  assert "2:30 PM" == g18n.format_time(en_translator, time, g18n.Short)
+  assert "14:30" == g18n.format_time(pt_translator, time, g18n.Short)
+  assert "2:30:45 PM" == g18n.format_time(en_translator, time, g18n.Medium)
+  assert "14:30:45" == g18n.format_time(pt_translator, time, g18n.Medium)
+
+  // Test format_datetime
+  assert "01/15/24 2:30 PM"
+    == g18n.format_datetime(en_translator, date, time, g18n.Short)
+  assert "15/01/24 14:30"
+    == g18n.format_datetime(pt_translator, date, time, g18n.Short)
+}
+
+pub fn translate_cardinal_alias_test() {
+  let assert Ok(locale) = g18n.locale("en")
+  let translations =
+    g18n.translations()
+    |> g18n.add_translation("item.one", "1 item")
+    |> g18n.add_translation("item.other", "{count} items")
+  let translator = g18n.translator(locale, translations)
+
+  // translate_cardinal should work exactly like translate_plural
+  assert "1 item" == g18n.translate_cardinal(translator, "item", 1)
+  assert "{count} items" == g18n.translate_cardinal(translator, "item", 5)
+}
+
+pub fn json_export_test() {
+  let translations =
+    g18n.translations()
+    |> g18n.add_translation("hello", "Hello")
+    |> g18n.add_translation("user.welcome", "Welcome {name}!")
+    |> g18n.add_translation("item.one", "1 item")
+
+  // Test translations_to_json
+  let json_output = g18n.translations_to_json(translations)
+
+  // Should be valid JSON containing our translations
+  let assert Ok(parsed_back) = g18n.translations_from_json(json_output)
+
+  // Test round-trip: original -> JSON -> back to translations
+  let assert Ok(test_locale) = g18n.locale("en")
+  let original_translator = g18n.translator(test_locale, translations)
+  let parsed_translator = g18n.translator(test_locale, parsed_back)
+
+  assert g18n.translate(original_translator, "hello")
+    == g18n.translate(parsed_translator, "hello")
+  assert g18n.translate(original_translator, "user.welcome")
+    == g18n.translate(parsed_translator, "user.welcome")
+  assert g18n.translate(original_translator, "item.one")
+    == g18n.translate(parsed_translator, "item.one")
+}
+
+pub fn validation_parameter_test() {
+  let assert Ok(locale) = g18n.locale("en")
+  let translations =
+    g18n.translations()
+    |> g18n.add_translation("user.welcome", "Welcome {name}!")
+    |> g18n.add_translation("user.profile", "Profile for {user} (ID: {id})")
+    |> g18n.add_translation("simple.message", "Simple message with no params")
+
+  // Test validate_translation_parameters
+  let no_errors =
+    g18n.validate_translation_parameters(
+      translations,
+      "user.welcome",
+      ["name"],
+      locale,
+    )
+  assert [] == no_errors
+
+  let missing_param_errors =
+    g18n.validate_translation_parameters(
+      translations,
+      "user.profile",
+      ["user"],
+      locale,
+    )
+  assert list.length(missing_param_errors) == 1
+
+  let unused_param_errors =
+    g18n.validate_translation_parameters(
+      translations,
+      "user.welcome",
+      ["name", "unused"],
+      locale,
+    )
+  assert list.length(unused_param_errors) == 1
+
+  let missing_translation_errors =
+    g18n.validate_translation_parameters(
+      translations,
+      "nonexistent.key",
+      ["param"],
+      locale,
+    )
+  assert list.length(missing_translation_errors) == 1
 }
