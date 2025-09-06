@@ -115,7 +115,7 @@ pub type LocalePreference { Preferred(Locale) Acceptable(Locale) }
 pub type LocaleMatch { ExactMatch(Locale) LanguageMatch(Locale) RegionFallback(Locale) NoMatch }
 ```
 
-#### New Public Functions
+#### New Public Functions (24 total)
 ```gleam
 // RTL/LTR Support (3 functions)
 pub fn get_text_direction(locale: Locale) -> TextDirection
@@ -143,6 +143,25 @@ pub fn translate_with_context(Translator, String, TranslationContext) -> String
 pub fn translate_with_context_and_params(Translator, String, TranslationContext, FormatParams) -> String  
 pub fn add_context_translation(Translations, String, String, String) -> Translations
 pub fn get_context_variants(Translations, String) -> List(#(String, String))
+
+// Nested JSON Support (5 functions)
+pub fn translations_from_nested_json(String) -> Result(Translations, String)
+pub fn translations_to_nested_json(Translations) -> String
+pub fn flatten_to_nested_dict(Dict(String, String)) -> Dict(String, json.Json)
+pub fn nested_to_flatten_dict(Dict(String, json.Json), String) -> Dict(String, String)
+pub fn nested_to_flat_strings(String) -> Result(Dict(String, String), String)
+```
+
+#### Enhanced CLI Commands
+```bash
+# Original command (flat JSON)
+gleam run generate        # Generate from flat JSON files
+
+# New command (nested JSON) 
+gleam run generate_nested # Generate from nested JSON files
+
+# Enhanced help
+gleam run help           # Detailed format examples and usage
 ```
 
 ### 🎯 Impact Summary
@@ -153,8 +172,12 @@ pub fn get_context_variants(Translations, String) -> List(#(String, String))
 | **Pluralization** | 3/12 languages (25%) | 12/12 languages (100%) | 🎯 300% language coverage increase |
 | **Locale Negotiation** | Basic fallback only | Enterprise HTTP negotiation | 🚀 Production web app ready |
 | **Context Support** | None | Full disambiguation | ✨ Professional translation quality |
-| **Test Coverage** | 29 tests | 34 tests | 📈 17% increase in test coverage |
-| **Documentation** | Partial | Complete with examples | 📚 Professional API docs |
+| **JSON Format Support** | Flat only | Flat + Nested (both formats) | 🔄 Industry standard compatibility |
+| **CLI Commands** | 1 command (`generate`) | 2 commands (`generate` + `generate_nested`) | ⚡ Complete workflow support |
+| **Framework Compatibility** | Limited | react-i18next, Vue i18n, Angular i18n | 🌐 Universal ecosystem support |
+| **Public API Functions** | ~49 functions | 73+ functions | 📈 49% API expansion |
+| **Test Coverage** | 29 tests | 35 tests | 📊 21% increase in test coverage |
+| **Documentation** | Basic | Complete with syntax guide | 📚 Professional-grade docs |
 
 ### 🌟 Library Status Upgrade
 
@@ -167,6 +190,52 @@ The g18n library now provides production-ready internationalization capabilities
 - ✅ High-quality multilingual content with context disambiguation  
 - ✅ Professional applications targeting all 12 supported languages
 - ✅ Mission-critical systems requiring comprehensive test coverage
+
+### 📋 Complete Function List Added in v1.1.0
+
+#### Documentation Functions (39 functions received comprehensive docs)
+All existing public functions from v1.0.0 received complete /// documentation with examples
+
+#### High-Priority Feature Functions (24 new functions)
+
+**RTL/LTR Text Direction (3 functions):**
+- `get_text_direction(locale)` - Detect LTR/RTL for proper UI layout
+- `is_rtl(locale)` - Boolean check for RTL languages
+- `get_css_direction(locale)` - CSS direction property ("ltr"/"rtl")
+
+**Locale Negotiation (3 functions):**  
+- `negotiate_locale(available, preferred)` - Smart locale matching
+- `parse_accept_language(header)` - HTTP header parsing
+- `get_locale_quality_score(preferred, available)` - Quality scoring
+
+**Expanded Pluralization (9 functions):**
+- `spanish_plural_rule(count)` - Spanish One/Other rules
+- `french_plural_rule(count)` - French One(0,1)/Other rules
+- `german_plural_rule(count)` - German One/Other rules  
+- `italian_plural_rule(count)` - Italian One/Other rules
+- `arabic_plural_rule(count)` - Arabic 6-form rules (Zero/One/Two/Few/Many/Other)
+- `chinese_plural_rule(count)` - Chinese no-pluralization
+- `japanese_plural_rule(count)` - Japanese no-pluralization
+- `korean_plural_rule(count)` - Korean no-pluralization
+- `hindi_plural_rule(count)` - Hindi One(0,1)/Other rules
+
+**Context-Sensitive Translations (4 functions):**
+- `translate_with_context(translator, key, context)` - Disambiguate by context
+- `translate_with_context_and_params(...)` - Context + parameters
+- `add_context_translation(translations, key, context, value)` - Helper for contexts  
+- `get_context_variants(translations, base_key)` - Discover contexts
+
+**Nested JSON Support (5 functions):**
+- `translations_from_nested_json(json_string)` - Import nested JSON
+- `translations_to_nested_json(translations)` - Export nested JSON
+- `flatten_to_nested_dict(flat_dict)` - Convert flat to nested
+- `nested_to_flatten_dict(nested_dict, prefix)` - Convert nested to flat
+- `nested_to_flat_strings(json_string)` - JSON string to flat dict
+
+#### Enhanced CLI System
+- **NEW**: `generate_nested` command for nested JSON workflows
+- **ENHANCED**: Detailed help with format examples
+- **IMPROVED**: Clear distinction between flat and nested workflows
 
 ---
 
