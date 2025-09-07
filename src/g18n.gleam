@@ -25,6 +25,22 @@ import splitter
 import tom
 import trie
 
+/// A translator that combines a locale with translations and optional fallback support.
+/// 
+/// This is the core type for performing translations. It holds the primary locale and translations,
+/// plus optional fallback locale and translations for when keys are missing in the primary set.
+///
+/// ## Examples
+/// ```gleam
+/// let assert Ok(en_locale) = locale.new("en")
+/// let translations = g18n.new_translations()
+///   |> g18n.add_translation("hello", "Hello")
+/// let translator = g18n.new_translator(en_locale, translations)
+/// 
+/// // With fallback
+/// let translator_with_fallback = translator
+///   |> g18n.with_fallback(fallback_locale, fallback_translations)
+/// ```
 pub opaque type Translator {
   Translator(
     locale: locale.Locale,
@@ -34,20 +50,73 @@ pub opaque type Translator {
   )
 }
 
+/// Parameters for string formatting and interpolation.
+///
+/// A dictionary mapping parameter names to their string values for use in
+/// translation templates like "Hello {name}!" or "You have {count} items".
+///
+/// ## Examples
+/// ```gleam
+/// let params = g18n.new_format_params()
+///   |> g18n.add_param("name", "Alice")
+///   |> g18n.add_param("count", "5")
+/// ```
 pub type FormatParams =
   Dict(String, String)
 
-// Context-sensitive translations
+/// Context for disambiguating translations with multiple meanings.
+///
+/// Used to distinguish between different meanings of the same word or phrase.
+/// For example, "bank" could refer to a financial institution or a riverbank.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.translate_with_context(translator, "bank", g18n.Context("financial"))
+/// // Returns "financial institution"
+/// 
+/// g18n.translate_with_context(translator, "bank", g18n.Context("river"))
+/// // Returns "riverbank"
+/// 
+/// g18n.translate_with_context(translator, "bank", g18n.NoContext)
+/// // Returns default "bank" translation
+/// ```
 pub type TranslationContext {
+  /// No specific context - use the default translation
   NoContext
+  /// Specific context to disambiguate meaning
   Context(String)
 }
 
-// Trie-based translations for hierarchical keys
+/// Container for translation key-value pairs with hierarchical organization.
+///
+/// Uses an efficient trie data structure for fast lookups and supports
+/// hierarchical keys with dot notation like "ui.button.save".
+/// This is an opaque type - use the provided functions to interact with it.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.new_translations()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_context_translation("bank", "financial", "Bank")
+/// ```
 pub opaque type Translations {
   Translations(translations: trie.Trie(String, String))
 }
 
+/// Duration units for relative time formatting.
+///
+/// Used to express time differences in human-readable formats like
+/// "2 hours ago" or "in 3 days".
+///
+/// ## Examples
+/// ```gleam
+/// g18n.format_relative_time(translator, g18n.Hours(2), g18n.Past)
+/// // "2 hours ago"
+/// 
+/// g18n.format_relative_time(translator, g18n.Days(3), g18n.Future)
+/// // "in 3 days"
+/// ```
 pub type RelativeDuration {
   Seconds(Int)
   Minutes(Int)
@@ -58,32 +127,86 @@ pub type RelativeDuration {
   Years(Int)
 }
 
+/// Direction for relative time formatting.
+///
+/// Indicates whether the time is in the past or future relative to now.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.format_relative_time(translator, g18n.Hours(2), g18n.Past)
+/// // "2 hours ago"
+/// 
+/// g18n.format_relative_time(translator, g18n.Hours(2), g18n.Future)
+/// // "in 2 hours"
+/// ```
 pub type TimeRelative {
+  /// Time in the past (e.g., "2 hours ago")
   Past
+  /// Time in the future (e.g., "in 2 hours")
   Future
 }
 
+/// Formatting styles for date and time display.
+///
+/// Provides different levels of detail and formats for displaying dates and times,
+/// from compact short formats to verbose full formats with day names.
+///
+/// ## Examples
+/// ```gleam
+/// let date = calendar.Date(2024, calendar.January, 15)
+/// 
+/// g18n.format_date(translator, date, g18n.Short)
+/// // "1/15/24"
+/// 
+/// g18n.format_date(translator, date, g18n.Full)
+/// // "Monday, January 15, 2024"
+/// 
+/// g18n.format_date(translator, date, g18n.Custom("YYYY-MM-DD"))
+/// // "2024-01-15"
+/// ```
 pub type DateTimeFormat {
+  /// Compact format: 12/25/23, 3:45 PM
   Short
-  // 12/25/23, 3:45 PM
+  /// Medium format: Dec 25, 2023, 3:45:30 PM
   Medium
-  // Dec 25, 2023, 3:45:30 PM  
+  /// Long format: December 25, 2023, 3:45:30 PM GMT
   Long
-  // December 25, 2023, 3:45:30 PM GMT
+  /// Full format: Monday, December 25, 2023, 3:45:30 PM GMT
   Full
-  // Monday, December 25, 2023, 3:45:30 PM GMT
+  /// Custom format string: "YYYY-MM-DD HH:mm:ss"
   Custom(String)
-  // "YYYY-MM-DD HH:mm:ss"
 }
 
-// Number Formatting Types and Functions
+/// Number formatting styles for locale-aware number display.
+///
+/// Supports various number formats including decimals, currency, percentages,
+/// scientific notation, and compact notation for large numbers.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.format_number(translator, 1234.56, g18n.Decimal(2))
+/// // "1,234.56" (English) or "1.234,56" (German)
+/// 
+/// g18n.format_number(translator, 1234.56, g18n.Currency("USD", 2))
+/// // "$1,234.56"
+/// 
+/// g18n.format_number(translator, 0.75, g18n.Percentage(1))
+/// // "75.0%"
+/// 
+/// g18n.format_number(translator, 1000000.0, g18n.Compact)
+/// // "1.0M"
+/// ```
 pub type NumberFormat {
+  /// Decimal format with specified precision
   Decimal(precision: Int)
+  /// Currency format with currency code and precision
   Currency(currency_code: String, precision: Int)
+  /// Percentage format with precision
   Percentage(precision: Int)
+  /// Scientific notation with precision
   Scientific(precision: Int)
+  /// Compact format: 1.2K, 3.4M, 1.2B
   Compact
-  // 1.2K, 3.4M, 1.2B
 }
 
 // Locale Functions
@@ -222,25 +345,67 @@ pub fn extract_placeholders(template: String) -> List(String) {
   |> list.filter(fn(placeholder) { placeholder != "" })
 }
 
-// Translation Validation System
+/// Errors found during translation validation.
+///
+/// Represents different types of issues that can be found when validating
+/// translations between different locales, such as missing keys, parameter
+/// mismatches, or incomplete plural forms.
+///
+/// ## Examples
+/// ```gleam
+/// let report = g18n.validate_translations(primary, target, es_locale)
+/// list.each(report.errors, fn(error) {
+///   case error {
+///     g18n.MissingTranslation(key, locale) -> 
+///       io.println("Missing: " <> key <> " for " <> locale.to_string(locale))
+///     g18n.MissingParameter(key, param, locale) ->
+///       io.println("Missing param {" <> param <> "} in " <> key)
+///     _ -> Nil
+///   }
+/// })
+/// ```
 pub type ValidationError {
+  /// Translation key exists in primary but missing in target locale
   MissingTranslation(key: String, locale: locale.Locale)
+  /// Required parameter is missing from translation template
   MissingParameter(key: String, param: String, locale: locale.Locale)
+  /// Parameter exists in translation but not expected
   UnusedParameter(key: String, param: String, locale: locale.Locale)
+  /// Plural form is incomplete (missing required plural variants)
   InvalidPluralForm(
     key: String,
     missing_forms: List(String),
     locale: locale.Locale,
   )
+  /// Translation key exists but has empty/blank value
   EmptyTranslation(key: String, locale: locale.Locale)
 }
 
+/// Complete validation report with errors, warnings, and coverage statistics.
+///
+/// Provides comprehensive analysis of translation completeness and quality
+/// between a primary locale (e.g., English) and target locales.
+///
+/// ## Examples
+/// ```gleam
+/// let report = g18n.validate_translations(primary, target, es_locale)
+/// 
+/// io.println("Coverage: " <> float.to_string(report.coverage * 100.0) <> "%")
+/// io.println("Errors: " <> int.to_string(list.length(report.errors)))
+/// io.println("Translated: " <> int.to_string(report.translated_keys) 
+///   <> "/" <> int.to_string(report.total_keys))
+/// ```
 pub type ValidationReport {
   ValidationReport(
+    /// List of validation errors found
     errors: List(ValidationError),
+    /// List of validation warnings (non-critical issues)  
     warnings: List(ValidationError),
+    /// Total number of keys in primary translations
     total_keys: Int,
+    /// Number of keys successfully translated in target
     translated_keys: Int,
+    /// Translation coverage as decimal (0.0 to 1.0)
     coverage: Float,
   )
 }
