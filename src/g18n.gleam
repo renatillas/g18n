@@ -1,5 +1,9 @@
 import argv
 import filepath
+import g18n/internal/format
+import g18n/internal/helpers
+import g18n/locale
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -13,77 +17,25 @@ import gleam/regexp
 import gleam/result
 import gleam/string
 import gleam/time/calendar
+import gleam_community/maths
+import shellout
 import simplifile
+import snag.{type Result as SnagResult}
 import splitter
 import tom
 import trie
 
-// Core Types
-pub type Locale {
-  Locale(language: String, region: Option(String))
-}
-
-pub type LocaleError {
-  InvalidLanguage(reason: String)
-  InvalidLocale(reason: String)
-}
-
-// Trie-based translations for hierarchical keys
-pub type Translations =
-  trie.Trie(String, String)
-
-pub type FormatParams =
-  Dict(String, String)
-
-pub type Translator {
+pub opaque type Translator {
   Translator(
-    locale: Locale,
+    locale: locale.Locale,
     translations: Translations,
-    fallback_locale: Option(Locale),
+    fallback_locale: Option(locale.Locale),
     fallback_translations: Option(Translations),
   )
 }
 
-pub type PluralRule {
-  Zero
-  One
-  Two
-  Few
-  Many
-  Other
-}
-
-pub type PluralRules =
-  fn(Int) -> PluralRule
-
-// Advanced pluralization types
-pub type PluralForm {
-  Cardinal(Int)
-  // 0, 1, 2, 3... (regular counting)
-  Ordinal(Int)
-  // 1st, 2nd, 3rd... (position/ranking)
-  Range(from: Int, to: Int)
-  // 1-3 items (ranges)
-}
-
-pub type OrdinalRule {
-  First
-  // 1st, 21st, 31st...
-  Second
-  // 2nd, 22nd, 32nd...
-  Third
-  // 3rd, 23rd, 33rd...
-  Nth
-  // 4th, 5th, 6th... (default)
-}
-
-// RTL/LTR Support
-pub type TextDirection {
-  LTR
-  // Left-to-Right (English, Spanish, German, etc.)
-  RTL
-  // Right-to-Left (Arabic, Hebrew, Persian, etc.)
-}
+pub type FormatParams =
+  Dict(String, String)
 
 // Context-sensitive translations
 pub type TranslationContext {
@@ -91,194 +43,1247 @@ pub type TranslationContext {
   Context(String)
 }
 
-// Locale negotiation types
-pub type LocalePreference {
-  Preferred(Locale)
-  Acceptable(Locale)
+// Trie-based translations for hierarchical keys
+pub opaque type Translations {
+  Translations(translations: trie.Trie(String, String))
 }
 
-pub type LocaleMatch {
-  ExactMatch(Locale)
-  LanguageMatch(Locale)
-  RegionFallback(Locale)
-  NoMatch
+pub type RelativeDuration {
+  Seconds(Int)
+  Minutes(Int)
+  Hours(Int)
+  Days(Int)
+  Weeks(Int)
+  Months(Int)
+  Years(Int)
+}
+
+pub type TimeRelative {
+  Past
+  Future
+}
+
+pub type DateTimeFormat {
+  Short
+  // 12/25/23, 3:45 PM
+  Medium
+  // Dec 25, 2023, 3:45:30 PM  
+  Long
+  // December 25, 2023, 3:45:30 PM GMT
+  Full
+  // Monday, December 25, 2023, 3:45:30 PM GMT
+  Custom(String)
+  // "YYYY-MM-DD HH:mm:ss"
+}
+
+// Number Formatting Types and Functions
+pub type NumberFormat {
+  Decimal(precision: Int)
+  Currency(currency_code: String, precision: Int)
+  Percentage(precision: Int)
+  Scientific(precision: Int)
+  Compact
+  // 1.2K, 3.4M, 1.2B
 }
 
 // Locale Functions
 
-/// Create a new locale from a locale code string.
-/// Supports formats like "en", "en-US", "pt-BR".
+/// Add a context-sensitive translation to a translations container.
+///
+/// Helper function to add translations with context using the `key@context` format.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_context_translation("bank", "financial", "financial institution")
+///   |> g18n.add_context_translation("bank", "river", "riverbank")
+///   |> g18n.add_context_translation("bank", "turn", "lean to one side")
+/// ```
+pub fn add_context_translation(
+  translations: Translations,
+  key: String,
+  context: String,
+  value: String,
+) -> Translations {
+  let context_key = key <> "@" <> context
+  add_translation(translations, context_key, value)
+}
+
+/// Get all context variants for a given base key.
+///
+/// Returns all translations that match the base key with different contexts.
+/// Useful for discovering available contexts for a particular key.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("bank", "bank")
+///   |> g18n.add_context_translation("bank", "financial", "financial institution")
+///   |> g18n.add_context_translation("bank", "river", "riverbank")
 /// 
+/// g18n.get_context_variants(translations, "bank")
+/// // [#("bank", "bank"), #("bank@financial", "financial institution"), #("bank@river", "riverbank")]
+/// ```
+pub fn context_variants(
+  translations: Translations,
+  base_key: String,
+) -> List(#(String, String)) {
+  trie.fold(translations.translations, [], fn(acc, key_parts, value) {
+    let full_key = string.join(key_parts, ".")
+    case string.starts_with(full_key, base_key) {
+      True -> [#(full_key, value), ..acc]
+      False -> acc
+    }
+  })
+  |> list.reverse
+}
+
+// Translation Management
+/// Create a new empty translations container.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.new()
+///   |> g18n.add_translation("hello", "Hello")
+///   |> g18n.add_translation("goodbye", "Goodbye")
+/// ```
+pub fn new_translations() -> Translations {
+  Translations(trie.new())
+}
+
+/// Add a translation key-value pair to a translations container.
+///
+/// Supports hierarchical keys using dot notation for organization.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.new()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_translation("user.name", "Name")
+/// ```
+pub fn add_translation(
+  translations: Translations,
+  key: String,
+  value: String,
+) -> Translations {
+  let key_parts = string.split(key, ".")
+  Translations(trie.insert(translations.translations, key_parts, value))
+}
+
+/// Get all translation keys that start with a given prefix.
+///
+/// Useful for finding all keys within a specific namespace.
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.new()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_translation("user.name", "Name")
+/// 
+/// g18n.get_keys_with_prefix(translations, "ui.button")
+/// // ["ui.button.save", "ui.button.cancel"]
+/// ```
+pub fn get_keys_with_prefix(
+  translations: Translations,
+  prefix: String,
+) -> List(String) {
+  let prefix_parts = string.split(prefix, ".")
+  trie.fold(translations.translations, [], fn(acc, key_parts, _value) {
+    let full_key = string.join(key_parts, ".")
+    case helpers.has_prefix(key_parts, prefix_parts) {
+      True -> [full_key, ..acc]
+      False -> acc
+    }
+  })
+  |> list.reverse
+}
+
+/// Extract all parameter placeholders from a template string.
+///
+/// Returns a list of parameter names found within {braces}.
+///
+/// ## Examples
+/// ```gleam
+/// g18n.extract_placeholders("Hello {name}, you have {count} new {type}")
+/// // ["name", "count", "type"]
+/// ```
+pub fn extract_placeholders(template: String) -> List(String) {
+  let assert Ok(placeholder_regex) = regexp.from_string("\\{([^}]+)\\}")
+
+  regexp.scan(placeholder_regex, template)
+  |> list.map(fn(match) {
+    case match.submatches {
+      [Some(placeholder)] -> placeholder
+      _ -> ""
+    }
+  })
+  |> list.filter(fn(placeholder) { placeholder != "" })
+}
+
+// Translation Validation System
+pub type ValidationError {
+  MissingTranslation(key: String, locale: locale.Locale)
+  MissingParameter(key: String, param: String, locale: locale.Locale)
+  UnusedParameter(key: String, param: String, locale: locale.Locale)
+  InvalidPluralForm(
+    key: String,
+    missing_forms: List(String),
+    locale: locale.Locale,
+  )
+  EmptyTranslation(key: String, locale: locale.Locale)
+}
+
+pub type ValidationReport {
+  ValidationReport(
+    errors: List(ValidationError),
+    warnings: List(ValidationError),
+    total_keys: Int,
+    translated_keys: Int,
+    coverage: Float,
+  )
+}
+
+/// Validate target translations against primary translations.
+///
+/// Compares a primary set of translations (e.g., English) with target translations
+/// (e.g., Spanish) to identify missing translations, parameter mismatches, invalid
+/// plural forms, and empty translations. Returns a comprehensive validation report
+/// with error details and translation coverage statistics.
+///
 /// ## Examples
 /// ```gleam
 /// let assert Ok(en) = g18n.locale("en")
-/// let assert Ok(en_us) = g18n.locale("en-US")
-/// let assert Error(_) = g18n.locale("invalid")
+/// let assert Ok(es) = g18n.locale("es")
+/// 
+/// let primary = g18n.new()
+///   |> g18n.add_translation("welcome", "Welcome {name}!")
+///   |> g18n.add_translation("items.one", "1 item")
+///   |> g18n.add_translation("items.other", "{count} items")
+/// 
+/// let target = g18n.new()
+///   |> g18n.add_translation("welcome", "¡Bienvenido {nombre}!")  // Parameter mismatch
+///   |> g18n.add_translation("items.one", "1 artículo")
+///   // Missing "items.other" translation
+/// 
+/// let report = g18n.validate_translations(primary, target, es)
+/// // report.errors will contain MissingParameter and MissingTranslation errors
+/// // report.coverage will be 0.67 (2 out of 3 keys translated)
 /// ```
-pub fn locale(locale_code: String) -> Result(Locale, LocaleError) {
-  parse_locale(locale_code)
+pub fn validate_translations(
+  primary_translations: Translations,
+  target_translations: Translations,
+  target_locale: locale.Locale,
+) -> ValidationReport {
+  let primary_keys = get_all_translation_keys(primary_translations)
+  let target_keys = get_all_translation_keys(target_translations)
+
+  let missing_translations =
+    find_missing_translations(primary_keys, target_keys, target_locale)
+  let parameter_errors =
+    validate_all_parameters(
+      primary_translations,
+      target_translations,
+      target_locale,
+    )
+  let plural_errors = validate_plural_forms(target_translations, target_locale)
+  let empty_errors = find_empty_translations(target_translations, target_locale)
+
+  let all_errors =
+    list.flatten([
+      missing_translations,
+      parameter_errors,
+      plural_errors,
+      empty_errors,
+    ])
+  let total_keys = list.length(primary_keys)
+  let translated_keys = list.length(target_keys)
+  let coverage = case total_keys {
+    0 -> 0.0
+    _ -> int.to_float(translated_keys) /. int.to_float(total_keys)
+  }
+
+  ValidationReport(
+    errors: all_errors,
+    warnings: [],
+    total_keys: total_keys,
+    translated_keys: translated_keys,
+    coverage: coverage,
+  )
 }
 
-/// Convert a locale back to its string representation.
-/// 
+/// Validate that a translation key has the correct parameters.
+///
+/// Checks if a specific translation contains all required parameters and
+/// identifies any unused parameters. This ensures parameter consistency
+/// between different language versions of the same translation.
+///
 /// ## Examples
 /// ```gleam
-/// let assert Ok(locale) = g18n.locale("en-US")
-/// g18n.locale_string(locale) // "en-US"
+/// let assert Ok(locale) = g18n.locale("es")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("user.greeting", "Hola {nombre}!")
+///   |> g18n.add_translation("user.stats", "Tienes {points} puntos")
+/// 
+/// // Check if Spanish translation has required English parameters
+/// let errors1 = g18n.validate_translation_parameters(
+///   translations, "user.greeting", ["name"], locale
+/// )
+/// // Returns [MissingParameter("user.greeting", "name", locale)] - "name" missing, "nombre" unused
+/// 
+/// let errors2 = g18n.validate_translation_parameters(
+///   translations, "user.stats", ["points"], locale  
+/// )
+/// // Returns [] - parameters match correctly
 /// ```
-pub fn locale_string(locale: Locale) -> String {
-  case locale.region {
-    Some(region) -> locale.language <> "-" <> region
-    None -> locale.language
+pub fn validate_translation_parameters(
+  translations: Translations,
+  key: String,
+  required_params: List(String),
+  locale: locale.Locale,
+) -> List(ValidationError) {
+  let key_parts = string.split(key, ".")
+  case trie.get(translations.translations, key_parts) {
+    Ok(template) -> {
+      let found_params = extract_placeholders(template)
+      let missing =
+        list.filter(required_params, fn(param) {
+          !list.contains(found_params, param)
+        })
+      let unused =
+        list.filter(found_params, fn(param) {
+          !list.contains(required_params, param)
+        })
+
+      let missing_errors =
+        list.map(missing, fn(param) { MissingParameter(key, param, locale) })
+      let unused_warnings =
+        list.map(unused, fn(param) { UnusedParameter(key, param, locale) })
+
+      list.append(missing_errors, unused_warnings)
+    }
+    Error(_) -> [MissingTranslation(key, locale)]
   }
 }
 
-/// Extract the language code from a locale.
-/// 
-/// ## Examples
-/// ```gleam
-/// let assert Ok(locale) = g18n.locale("en-US")
-/// g18n.locale_language(locale) // "en"
-/// ```
-pub fn locale_language(locale: Locale) -> String {
-  locale.language
-}
-
-/// Extract the region code from a locale.
-/// 
-/// ## Examples
-/// ```gleam
-/// let assert Ok(locale) = g18n.locale("en-US")
-/// g18n.locale_region(locale) // Some("US")
-/// ```
-pub fn locale_region(locale: Locale) -> Option(String) {
-  locale.region
-}
-
-/// Check if two locales share the same language (ignoring region).
-/// 
-/// ## Examples
-/// ```gleam
-/// let assert Ok(en_us) = g18n.locale("en-US")
-/// let assert Ok(en_gb) = g18n.locale("en-GB")
-/// g18n.locales_match_language(en_us, en_gb) // True
-/// ```
-pub fn locales_match_language(locale1: Locale, locale2: Locale) -> Bool {
-  locale1.language == locale2.language
-}
-
-/// Check if two locales are exactly identical.
-/// 
-/// ## Examples
-/// ```gleam
-/// let assert Ok(en_us1) = g18n.locale("en-US")
-/// let assert Ok(en_us2) = g18n.locale("en-US")
-/// g18n.locales_exact_match(en_us1, en_us2) // True
-/// ```
-pub fn locales_exact_match(locale1: Locale, locale2: Locale) -> Bool {
-  locale1.language == locale2.language && locale1.region == locale2.region
-}
-
-/// Create a new locale with only the language part (no region).
-/// 
-/// ## Examples
-/// ```gleam
-/// let assert Ok(en_us) = g18n.locale("en-US")
-/// let en_only = g18n.locale_language_only(en_us)
-/// g18n.locale_string(en_only) // "en"
-/// ```
-pub fn locale_language_only(locale: Locale) -> Locale {
-  Locale(language: locale.language, region: None)
-}
-
-/// Get the text direction for a locale.
+/// Calculate translation coverage percentage.
 ///
-/// Determines whether text should flow left-to-right (LTR) or right-to-left (RTL)
-/// based on the locale's language. Essential for proper UI layout and text rendering.
+/// Computes the percentage of primary translation keys that have been
+/// translated in the target translations. Returns a float between 0.0 and 1.0
+/// where 1.0 indicates complete coverage (100%).
 ///
 /// ## Examples
 /// ```gleam
-/// let assert Ok(arabic) = g18n.locale("ar")
-/// let assert Ok(english) = g18n.locale("en")
+/// let primary = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello")
+///   |> g18n.add_translation("goodbye", "Goodbye")
+///   |> g18n.add_translation("welcome", "Welcome")
 /// 
-/// g18n.get_text_direction(arabic)  // RTL
-/// g18n.get_text_direction(english) // LTR
+/// let partial_target = g18n.translations()
+///   |> g18n.add_translation("hello", "Hola")
+///   |> g18n.add_translation("goodbye", "Adiós")
+///   // Missing "welcome" translation
+/// 
+/// let coverage = g18n.get_translation_coverage(primary, partial_target)
+/// // coverage == 0.67 (67% - 2 out of 3 keys translated)
+/// 
+/// let complete_target = partial_target
+///   |> g18n.add_translation("welcome", "Bienvenido")
+/// 
+/// let full_coverage = g18n.get_translation_coverage(primary, complete_target)
+/// // full_coverage == 1.0 (100% coverage)
 /// ```
-pub fn get_text_direction(locale: Locale) -> TextDirection {
-  case locale.language {
-    // RTL languages
-    "ar" | "he" | "fa" | "ur" | "ps" | "ks" | "sd" | "ug" | "yi" -> RTL
-    // All others are LTR by default
-    _ -> LTR
+pub fn translation_coverage(
+  primary_translations: Translations,
+  target_translations: Translations,
+) -> Float {
+  let primary_count = count_translations(primary_translations)
+  let target_count = count_translations(target_translations)
+
+  case primary_count {
+    0 -> 0.0
+    _ -> int.to_float(target_count) /. int.to_float(primary_count)
   }
 }
 
-/// Check if a locale uses right-to-left text direction.
+/// Find translation keys that are not being used in the application.
+///
+/// Compares all available translation keys against a list of keys actually used
+/// in the application code. Returns keys that exist in translations but are not
+/// referenced, helping identify obsolete translations that can be removed.
 ///
 /// ## Examples
 /// ```gleam
-/// let assert Ok(arabic) = g18n.locale("ar-SA")
-/// let assert Ok(english) = g18n.locale("en-US")
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("common.save", "Save")
+///   |> g18n.add_translation("common.cancel", "Cancel")
+///   |> g18n.add_translation("old.feature", "Old Feature")
+///   |> g18n.add_translation("user.profile", "Profile")
 /// 
-/// g18n.is_rtl(arabic)  // True
-/// g18n.is_rtl(english) // False
+/// // Keys actually used in application code
+/// let used_keys = ["common.save", "common.cancel", "user.profile"]
+/// 
+/// let unused = g18n.find_unused_translations(translations, used_keys)
+/// // unused == ["old.feature"] - this key exists but is not used
+/// 
+/// // If all keys are used
+/// let all_used = ["common.save", "common.cancel", "old.feature", "user.profile"]
+/// let no_unused = g18n.find_unused_translations(translations, all_used)
+/// // no_unused == [] - all translation keys are being used
 /// ```
-pub fn is_rtl(locale: Locale) -> Bool {
-  case get_text_direction(locale) {
-    RTL -> True
-    LTR -> False
-  }
+pub fn find_unused_translations(
+  translations: Translations,
+  used_keys: List(String),
+) -> List(String) {
+  let all_keys = get_all_translation_keys(translations)
+  list.filter(all_keys, fn(key) { !list.contains(used_keys, key) })
 }
 
-/// Get the CSS direction property value for a locale.
+/// Export a validation report to a formatted string.
 ///
-/// Returns the appropriate CSS direction value for styling purposes.
+/// Converts a ValidationReport into a human-readable text format suitable
+/// for display in console output, log files, or CI/CD reports. Includes
+/// coverage statistics, error counts, and detailed error descriptions.
 ///
 /// ## Examples
 /// ```gleam
-/// let assert Ok(arabic) = g18n.locale("ar")
-/// let assert Ok(english) = g18n.locale("en")
+/// let assert Ok(en) = g18n.locale("en")
+/// let assert Ok(es) = g18n.locale("es")
 /// 
-/// g18n.get_css_direction(arabic)  // "rtl"
-/// g18n.get_css_direction(english) // "ltr"
+/// let primary = g18n.translations()
+///   |> g18n.add_translation("hello", "Hello {name}!")
+///   |> g18n.add_translation("goodbye", "Goodbye")
+/// 
+/// let target = g18n.translations()
+///   |> g18n.add_translation("hello", "Hola {nombre}!")  // Parameter mismatch
+///   // Missing "goodbye" translation
+/// 
+/// let report = g18n.validate_translations(primary, target, es)
+/// let formatted = g18n.export_validation_report(report)
+/// 
+/// // formatted contains:
+/// // "Translation Validation Report"
+/// // "================================"
+/// // "Coverage: 50.0%"
+/// // "Total Keys: 2"
+/// // "Translated: 1" 
+/// // "Errors: 2"
+/// // "Warnings: 0"
+/// // 
+/// // "ERRORS:"
+/// // "Missing translation: 'goodbye' for locale es"
+/// // "Missing parameter: 'name' in 'hello' for locale es"
 /// ```
-pub fn get_css_direction(locale: Locale) -> String {
-  case get_text_direction(locale) {
-    RTL -> "rtl"
-    LTR -> "ltr"
+pub fn export_validation_report(report: ValidationReport) -> String {
+  let error_count = list.length(report.errors)
+  let warning_count = list.length(report.warnings)
+
+  let header =
+    "Translation Validation Report\n"
+    <> "================================\n"
+    <> "Coverage: "
+    <> float.to_string(report.coverage *. 100.0)
+    <> "%\n"
+    <> "Total Keys: "
+    <> int.to_string(report.total_keys)
+    <> "\n"
+    <> "Translated: "
+    <> int.to_string(report.translated_keys)
+    <> "\n"
+    <> "Errors: "
+    <> int.to_string(error_count)
+    <> "\n"
+    <> "Warnings: "
+    <> int.to_string(warning_count)
+    <> "\n\n"
+
+  let error_section = case error_count {
+    0 -> ""
+    _ -> "ERRORS:\n" <> format_validation_errors(report.errors) <> "\n"
+  }
+
+  let warning_section = case warning_count {
+    0 -> ""
+    _ -> "WARNINGS:\n" <> format_validation_errors(report.warnings) <> "\n"
+  }
+
+  header <> error_section <> warning_section
+}
+
+fn get_all_translation_keys(translations: Translations) -> List(String) {
+  trie.fold(translations.translations, [], fn(acc, key_parts, _value) {
+    let key = string.join(key_parts, ".")
+    [key, ..acc]
+  })
+}
+
+fn find_missing_translations(
+  primary_keys: List(String),
+  target_keys: List(String),
+  locale: locale.Locale,
+) -> List(ValidationError) {
+  list.filter_map(primary_keys, fn(key) {
+    case list.contains(target_keys, key) {
+      True -> Error(Nil)
+      False -> Ok(MissingTranslation(key, locale))
+    }
+  })
+}
+
+fn validate_all_parameters(
+  primary_translations: Translations,
+  target_translations: Translations,
+  target_locale: locale.Locale,
+) -> List(ValidationError) {
+  let target_keys = get_all_translation_keys(target_translations)
+
+  list.flat_map(target_keys, fn(key) {
+    let key_parts = string.split(key, ".")
+    case
+      trie.get(primary_translations.translations, key_parts),
+      trie.get(target_translations.translations, key_parts)
+    {
+      Ok(primary_template), Ok(_) -> {
+        let primary_params = extract_placeholders(primary_template)
+        validate_translation_parameters(
+          target_translations,
+          key,
+          primary_params,
+          target_locale,
+        )
+      }
+      _, _ -> []
+    }
+  })
+}
+
+fn validate_plural_forms(
+  translations: Translations,
+  locale: locale.Locale,
+) -> List(ValidationError) {
+  let all_keys = get_all_translation_keys(translations)
+  let base_keys =
+    list.filter_map(all_keys, fn(key) {
+      case
+        string.contains(key, ".one")
+        || string.contains(key, ".other")
+        || string.contains(key, ".zero")
+      {
+        True -> {
+          let base = case splitter.split(splitter.new([key]), ".one") {
+            #(base, ".one", _) -> Ok(base)
+            _ ->
+              case splitter.split(splitter.new([key]), ".other") {
+                #(base, ".other", _) -> Ok(base)
+                _ ->
+                  case splitter.split(splitter.new([key]), ".zero") {
+                    #(base, ".zero", _) -> Ok(base)
+                    _ -> Error(Nil)
+                  }
+              }
+          }
+          base
+        }
+        False -> Error(Nil)
+      }
+    })
+
+  list.flat_map(base_keys, fn(base_key) {
+    validate_single_plural_form(translations, base_key, locale)
+  })
+}
+
+fn validate_single_plural_form(
+  translations: Translations,
+  base_key: String,
+  locale: locale.Locale,
+) -> List(ValidationError) {
+  let required_forms = case locale.language(locale) {
+    "en" -> ["one", "other"]
+    "pt" -> ["zero", "one", "other"]
+    "ru" -> ["one", "few", "many"]
+    _ -> ["one", "other"]
+  }
+
+  let missing_forms =
+    list.filter(required_forms, fn(form) {
+      let key_parts = string.split(base_key <> "." <> form, ".")
+      case trie.get(translations.translations, key_parts) {
+        Ok(_) -> False
+        Error(_) -> True
+      }
+    })
+
+  case missing_forms {
+    [] -> []
+    forms -> [InvalidPluralForm(base_key, forms, locale)]
   }
 }
 
-fn parse_locale(locale_code: String) -> Result(Locale, LocaleError) {
-  let normalized = string.lowercase(string.trim(locale_code))
-  let dash_splitter = splitter.new(["-"])
-  let #(lang, separator, region) = splitter.split(dash_splitter, normalized)
+fn find_empty_translations(
+  translations: Translations,
+  locale: locale.Locale,
+) -> List(ValidationError) {
+  trie.fold(translations.translations, [], fn(acc, key_parts, value) {
+    let key = string.join(key_parts, ".")
+    case string.trim(value) {
+      "" -> [EmptyTranslation(key, locale), ..acc]
+      _ -> acc
+    }
+  })
+}
 
-  case separator, region {
-    "", "" -> {
-      // No separator found, just language
-      case string.length(lang) {
-        2 -> Ok(Locale(language: lang, region: None))
-        _ -> Error(InvalidLanguage("Language code must be 2 characters"))
+fn count_translations(translations: Translations) -> Int {
+  trie.fold(translations.translations, 0, fn(count, _key, _value) { count + 1 })
+}
+
+fn format_validation_errors(errors: List(ValidationError)) -> String {
+  errors
+  |> list.map(fn(error) {
+    case error {
+      MissingTranslation(key, locale) ->
+        "  - Missing translation for '"
+        <> key
+        <> "' in "
+        <> locale.to_string(locale)
+      MissingParameter(key, param, locale) ->
+        "  - Missing parameter '{"
+        <> param
+        <> "}' in '"
+        <> key
+        <> "' ("
+        <> locale.to_string(locale)
+        <> ")"
+      UnusedParameter(key, param, locale) ->
+        "  - Unused parameter '{"
+        <> param
+        <> "}' in '"
+        <> key
+        <> "' ("
+        <> locale.to_string(locale)
+        <> ")"
+      InvalidPluralForm(key, forms, locale) ->
+        "  - Missing plural forms "
+        <> string.join(forms, with: ", ")
+        <> " for '"
+        <> key
+        <> "' in "
+        <> locale.to_string(locale)
+      EmptyTranslation(key, locale) ->
+        "  - Empty translation for '"
+        <> key
+        <> "' in "
+        <> locale.to_string(locale)
+    }
+  })
+  |> string.join("\n")
+}
+
+// JSON Loading Functions
+
+/// Parse a JSON string into a Translations structure.
+/// 
+/// Converts a JSON object with dotted keys into an internal trie structure
+/// for efficient translation lookups. The JSON should contain key-value pairs
+/// where keys use dot notation (e.g., "user.name", "welcome.message") and
+/// values are the translation strings.
+/// 
+/// ## Examples
+/// ```gleam
+/// let json = "{\"user.name\": \"Name\", \"user.email\": \"Email\"}"
+/// let assert Ok(translations) = g18n.translations_from_json(json)
+/// ```
+pub fn translations_from_json(json_string: String) -> Result(Translations, Nil) {
+  case json.parse(json_string, decode.dict(decode.string, decode.string)) {
+    Ok(dict_result) -> {
+      // Convert dict to trie
+      let trie_result =
+        dict.fold(dict_result, new_translations(), fn(translations, key, value) {
+          let key_parts = string.split(key, ".")
+          Translations(trie.insert(translations.translations, key_parts, value))
+        })
+      Ok(trie_result)
+    }
+    Error(_) -> Error(Nil)
+  }
+}
+
+/// Convert a Translations structure to a JSON string.
+/// 
+/// Converts the internal trie structure back to a JSON object with dotted keys.
+/// This is useful for exporting translations or debugging the current state
+/// of loaded translations.
+/// 
+/// ## Examples
+/// ```gleam
+/// let assert Ok(translations) = g18n.translations_from_json("{\"user.name\": \"Name\"}")
+/// let json_output = g18n.translations_to_json(translations)
+/// // Returns: {"user.name": "Name"}
+/// ```
+pub fn translations_to_json(translations: Translations) -> String {
+  // Convert trie to dict for JSON serialization
+  let dict_translations =
+    trie.fold(
+      translations.translations,
+      dict.new(),
+      fn(dict_acc, key_parts, value) {
+        let key = string.join(key_parts, ".")
+        dict.insert(dict_acc, key, value)
+      },
+    )
+
+  dict_translations
+  |> dict.to_list
+  |> list.map(fn(pair) { #(pair.0, json.string(pair.1)) })
+  |> json.object
+  |> json.to_string
+}
+
+/// Import translations from nested JSON format.
+///
+/// Converts nested JSON objects to the internal flat trie structure.
+/// This is the industry-standard format used by most i18n libraries like
+/// react-i18next, Vue i18n, and Angular i18n.
+///
+/// ## Parameters
+/// - `json_string`: JSON string with nested structure
+///
+/// ## Returns
+/// `Result(Translations, String)` - Success with translations or error message
+///
+/// ## Examples
+/// ```gleam
+/// let nested_json = "
+/// {
+///   \"ui\": {
+///     \"button\": {
+///       \"save\": \"Save\",
+///       \"cancel\": \"Cancel\"
+///     }
+///   },
+///   \"user\": {
+///     \"name\": \"Name\",
+///     \"email\": \"Email\"
+///   }
+/// }"
+/// 
+/// let assert Ok(translations) = g18n.translations_from_nested_json(nested_json)
+/// // Converts to flat keys: "ui.button.save", "ui.button.cancel", etc.
+/// ```
+pub fn translations_from_nested_json(
+  json_string: String,
+) -> Result(Translations, String) {
+  case json.parse(json_string, decode.dict(decode.string, decode.dynamic)) {
+    Ok(dict_result) -> {
+      let flattened_dict = flatten_json_object(dict_result, "")
+      let trie_result =
+        dict.fold(flattened_dict, new_translations(), fn(trie, key, value) {
+          let key_parts = string.split(key, ".")
+          Translations(trie.insert(trie.translations, key_parts, value))
+        })
+      Ok(trie_result)
+    }
+    Error(_) -> Error("Failed to parse nested JSON: ")
+  }
+}
+
+/// Export translations to nested JSON format.
+///
+/// Converts the internal flat trie structure to nested JSON objects.
+/// This produces the industry-standard format expected by most i18n tools.
+///
+/// ## Parameters
+/// - `translations`: The translations to export
+///
+/// ## Returns
+/// `String` - Nested JSON representation of the translations
+///
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.translations()
+///   |> g18n.add_translation("ui.button.save", "Save")
+///   |> g18n.add_translation("ui.button.cancel", "Cancel")
+///   |> g18n.add_translation("user.name", "Name")
+/// 
+/// let nested_json = g18n.translations_to_nested_json(translations)
+/// // Returns: {"ui":{"button":{"save":"Save","cancel":"Cancel"}},"user":{"name":"Name"}}
+/// ```
+pub fn translations_to_nested_json(translations: Translations) -> String {
+  // Convert trie directly to nested JSON structure
+  trie_to_nested_json(translations)
+  |> json.to_string
+}
+
+// Helper function to recursively flatten nested dictionary
+fn flatten_json_object(
+  dict_obj: Dict(String, Dynamic),
+  prefix: String,
+) -> Dict(String, String) {
+  dict.fold(dict_obj, dict.new(), fn(acc, key, value) {
+    let current_key = case prefix {
+      "" -> key
+      _ -> prefix <> "." <> key
+    }
+
+    case decode.run(value, decode.dict(decode.string, decode.dynamic)) {
+      Ok(nested_dict) -> {
+        let nested_flattened = flatten_json_object(nested_dict, current_key)
+        dict.fold(nested_flattened, acc, dict.insert)
+      }
+      Error(_) -> {
+        // Try to decode as string
+        case decode.run(value, decode.string) {
+          Ok(str_value) -> dict.insert(acc, current_key, str_value)
+          Error(_) -> acc
+          // Skip non-string values
+        }
       }
     }
-    "-", reg -> {
-      // Separator found, validate both parts
-      let lang_len = string.length(lang)
-      let reg_len = string.length(reg)
-      case lang_len, reg_len {
-        2, 2 -> Ok(Locale(language: lang, region: Some(string.uppercase(reg))))
-        _, _ ->
-          Error(InvalidLanguage(
-            "Language must be 2 chars and region must be 2 chars, got: "
-            <> lang
-            <> "-"
-            <> reg,
-          ))
+  })
+}
+
+// Convert trie directly to nested JSON structure
+fn trie_to_nested_json(translations: Translations) -> json.Json {
+  // Collect all key-value pairs from trie
+  let all_pairs =
+    trie.fold(translations.translations, [], fn(acc, key_parts, value) {
+      [#(key_parts, value), ..acc]
+    })
+
+  // Build nested structure from key parts
+  build_nested_structure(all_pairs)
+}
+
+// Build nested JSON structure from list of (key_parts, value) pairs
+fn build_nested_structure(pairs: List(#(List(String), String))) -> json.Json {
+  pairs
+  |> list.fold(dict.new(), fn(acc, pair) {
+    let #(key_parts, value) = pair
+    insert_at_path(acc, key_parts, json.string(value))
+  })
+  |> dict.to_list
+  |> json.object
+}
+
+// Insert value at nested path in dict
+fn insert_at_path(
+  dict_acc: Dict(String, json.Json),
+  key_parts: List(String),
+  value: json.Json,
+) -> Dict(String, json.Json) {
+  case key_parts {
+    [] -> dict_acc
+    [single_key] -> dict.insert(dict_acc, single_key, value)
+    [first_key, ..remaining_keys] -> {
+      let existing = case dict.get(dict_acc, first_key) {
+        Ok(json_obj) -> extract_dict_from_json(json_obj)
+        Error(_) -> dict.new()
+      }
+      let updated = insert_at_path(existing, remaining_keys, value)
+      dict.insert(dict_acc, first_key, dict.to_list(updated) |> json.object)
+    }
+  }
+}
+
+// Extract dict from JSON object, return empty dict if not object
+fn extract_dict_from_json(json_val: json.Json) -> Dict(String, json.Json) {
+  case json_val {
+    _ -> dict.new()
+    // For now, return empty dict - will improve later
+  }
+}
+
+/// Main entry point for the g18n CLI tool.
+/// 
+/// Handles command-line arguments and dispatches to appropriate command handlers.
+/// Currently supports 'generate' command to create Gleam translation modules
+/// and 'help' command to display usage information.
+/// 
+/// ## Supported Commands
+/// - `generate`: Generate Gleam modules from translation JSON files
+/// - `help`: Display help information
+/// - No arguments: Display help information
+/// 
+/// ## Examples
+/// Run via command line:
+/// ```bash
+/// gleam run generate  # Generate translation modules
+/// gleam run help      # Show help
+/// gleam run           # Show help (default)
+/// ```
+/// Main entry point for the g18n CLI tool.
+/// 
+/// Handles command-line arguments and dispatches to appropriate command handlers.
+/// Supports 'generate' for flat JSON, 'generate_nested' for nested JSON,
+/// and 'help' for usage information.
+/// 
+/// ## Supported Commands
+/// - `generate`: Generate Gleam modules from flat JSON files
+/// - `generate_nested`: Generate Gleam modules from nested JSON files
+/// - `help`: Display help information
+/// - No arguments: Display help information
+/// 
+/// ## Examples
+/// Run via command line:
+/// ```bash
+/// gleam run generate        # Generate from flat JSON files
+/// gleam run generate_nested # Generate from nested JSON files  
+/// gleam run help           # Show help
+/// gleam run                # Show help (default)
+/// ```
+pub fn main() {
+  case argv.load().arguments {
+    ["generate"] -> generate_command()
+    ["generate_nested"] -> generate_nested_command()
+    ["help"] -> help_command()
+    [] -> help_command()
+    _ -> {
+      io.println("Unknown command. Use 'help' for available commands.")
+    }
+  }
+}
+
+fn generate_command() {
+  case generate_translations() {
+    Ok(path) -> {
+      io.println("🌏Generated translation modules from flat JSON")
+      io.println("  " <> path)
+    }
+    Error(msg) -> io.println_error(snag.pretty_print(msg))
+  }
+}
+
+fn generate_nested_command() {
+  case generate_nested_translations() {
+    Ok(path) -> {
+      io.println("🌏Generated translation modules from nested JSON")
+      io.println("  " <> path)
+    }
+    Error(msg) -> io.println(snag.pretty_print(msg))
+  }
+}
+
+fn help_command() {
+  io.println("g18n CLI - Internationalization for Gleam")
+  io.println("")
+  io.println("Commands:")
+  io.println("  generate         Generate Gleam module from flat JSON files")
+  io.println(
+    "  generate_nested  Generate Gleam module from nested JSON files (industry standard)",
+  )
+  io.println("  help             Show this help message")
+  io.println("")
+  io.println("Flat JSON usage:")
+  io.println("  Place flat JSON files in src/<project>/translations/")
+  io.println(
+    "  Example: {\"ui.button.save\": \"Save\", \"user.name\": \"Name\"}",
+  )
+  io.println("  Run 'gleam run generate' to create the translations module")
+  io.println("")
+  io.println("Nested JSON usage:")
+  io.println("  Place nested JSON files in src/<project>/translations/")
+  io.println(
+    "  Example: {\"ui\": {\"button\": {\"save\": \"Save\"}}, \"user\": {\"name\": \"Name\"}}",
+  )
+  io.println(
+    "  Run 'gleam run generate_nested' to create the translations module",
+  )
+  io.println("")
+  io.println("Supported formats:")
+  io.println("  ✅ Flat JSON (g18n optimized)")
+  io.println(
+    "  ✅ Nested JSON (react-i18next, Vue i18n, Angular i18n compatible)",
+  )
+  io.println("")
+}
+
+fn format() {
+  shellout.command("gleam", ["format"], in: find_root("."), opt: [])
+  |> snag.map_error(fn(_) { "Could not format generated file" })
+}
+
+fn generate_translations() -> SnagResult(String) {
+  use project_name <- result.try(get_project_name())
+  use locale_files <- result.try(find_locale_files(project_name))
+  use output_path <- result.try(write_module(project_name, locale_files))
+  use _ <- result.try(format())
+  Ok(output_path)
+}
+
+fn generate_nested_translations() -> SnagResult(String) {
+  use project_name <- result.try(get_project_name())
+  use locale_files <- result.try(find_locale_files(project_name))
+  use output_path <- result.try(write_module_from_nested(
+    project_name,
+    locale_files,
+  ))
+  use _ <- result.try(format())
+  Ok(output_path)
+}
+
+fn get_project_name() -> SnagResult(String) {
+  let root = find_root(".")
+  let toml_path = filepath.join(root, "gleam.toml")
+
+  use content <- result.try(
+    simplifile.read(toml_path)
+    |> snag.map_error(fn(_) { "Could not read gleam.toml" }),
+  )
+
+  use toml <- result.try(
+    tom.parse(content)
+    |> snag.map_error(fn(_) { "Could not parse gleam.toml" }),
+  )
+
+  use name <- result.try(
+    tom.get_string(toml, ["name"])
+    |> snag.map_error(fn(_) { "Could not find project name in gleam.toml" }),
+  )
+
+  Ok(name)
+}
+
+fn escape_string(str: String) -> String {
+  str
+  |> string.replace("\\", "\\\\")
+  |> string.replace("\"", "\\\"")
+  |> string.replace("\n", "\\n")
+  |> string.replace("\r", "\\r")
+  |> string.replace("\t", "\\t")
+}
+
+fn find_root(path: String) -> String {
+  let toml = filepath.join(path, "gleam.toml")
+
+  case simplifile.is_file(toml) {
+    Ok(False) | Error(_) -> find_root(filepath.join(path, ".."))
+    Ok(True) -> path
+  }
+}
+
+fn find_locale_files(
+  project_name: String,
+) -> SnagResult(List(#(String, String))) {
+  let root = find_root(".")
+  let translations_dir =
+    filepath.join(root, "src")
+    |> filepath.join(project_name)
+    |> filepath.join("translations")
+
+  case simplifile.read_directory(translations_dir) {
+    Ok(files) -> {
+      let locale_files =
+        files
+        |> list.filter(fn(file) {
+          string.ends_with(file, ".json") && file != "translations.json"
+        })
+        |> list.try_map(fn(file) {
+          let locale_code = string.drop_end(file, 5)
+          let file_path = filepath.join(translations_dir, file)
+          let locale_code = string.replace(locale_code, each: "-", with: "_")
+          use <- bool.guard(
+            string.length(locale_code) != 2 && string.length(locale_code) != 5,
+            snag.error(
+              "Locale code must be 2 or 5 characters (e.g., 'en' or 'en-US'): "
+              <> locale_code,
+            ),
+          )
+          Ok(#(locale_code, file_path))
+        })
+        |> snag.context("Error processing locale files")
+
+      case locale_files {
+        Ok([]) ->
+          snag.error(
+            "No locale JSON files found in "
+            <> translations_dir
+            <> "\nLooking for files like en.json, es.json, pt.json, etc.",
+          )
+        Ok(files) -> Ok(files)
+        Error(msg) -> Error(msg)
       }
     }
-    _, _ ->
-      Error(InvalidLocale("Invalid format, expected format: 'en-US' or 'en'"))
+    Error(_) ->
+      snag.error("Could not read translations directory: " <> translations_dir)
+  }
+}
+
+fn write_module(
+  project_name: String,
+  locale_files: List(#(String, String)),
+) -> SnagResult(String) {
+  use locale_data <- result.try(load_all_locales(locale_files))
+  let root = find_root(".")
+  let output_path =
+    filepath.join(root, "src")
+    |> filepath.join(project_name)
+    |> filepath.join("translations.gleam")
+
+  let module_content = generate_module_content(locale_data)
+
+  simplifile.write(output_path, module_content)
+  |> snag.map_error(fn(_) {
+    "Could not write translations module at: " <> output_path
+  })
+  |> result.map(fn(_) { output_path })
+}
+
+fn write_module_from_nested(
+  project_name: String,
+  locale_files: List(#(String, String)),
+) -> SnagResult(String) {
+  use locale_data <- result.try(load_all_locales_from_nested(locale_files))
+  let root = find_root(".")
+  let output_path =
+    filepath.join(root, "src")
+    |> filepath.join(project_name)
+    |> filepath.join("translations.gleam")
+
+  let module_content = generate_module_content(locale_data)
+
+  simplifile.write(output_path, module_content)
+  |> snag.map_error(fn(_) {
+    "Could not write translations module from nested JSON at: " <> output_path
+  })
+  |> result.map(fn(_) { output_path })
+}
+
+fn load_all_locales(
+  locale_files: List(#(String, String)),
+) -> SnagResult(List(#(String, Translations))) {
+  list_fold_result(locale_files, [], fn(acc, locale_file) {
+    let #(locale_code, file_path) = locale_file
+    use content <- result.try(
+      simplifile.read(file_path)
+      |> snag.map_error(fn(_) { "Could not read " <> file_path }),
+    )
+    use translations <- result.try(
+      translations_from_json(content)
+      |> snag.map_error(fn(_) { "Could not parse JSON in " <> file_path }),
+    )
+    Ok([#(locale_code, translations), ..acc])
+  })
+  |> result.map(list.reverse)
+}
+
+fn load_all_locales_from_nested(
+  locale_files: List(#(String, String)),
+) -> SnagResult(List(#(String, Translations))) {
+  list_fold_result(locale_files, [], fn(acc, locale_file) {
+    let #(locale_code, file_path) = locale_file
+    use content <- result.try(
+      simplifile.read(file_path)
+      |> snag.map_error(fn(_) { "Could not read " <> file_path }),
+    )
+    use translations <- result.try(
+      translations_from_nested_json(content)
+      |> snag.map_error(fn(e) {
+        "Could not parse nested JSON in " <> file_path <> ": " <> e
+      }),
+    )
+    Ok([#(locale_code, translations), ..acc])
+  })
+  |> result.map(list.reverse)
+  |> snag.context("Error loading nested JSON locale files")
+}
+
+fn generate_module_content(locale_data: List(#(String, Translations))) -> String {
+  let imports = "import g18n\nimport g18n/locale\n\n"
+
+  let locale_functions =
+    locale_data
+    |> list.map(fn(locale_pair) {
+      let #(locale_code, translations) = locale_pair
+      generate_single_locale_functions(locale_code, translations)
+    })
+    |> string.join("\n\n")
+
+  let all_locales_function = generate_all_locales_function(locale_data)
+
+  imports <> locale_functions <> "\n\n" <> all_locales_function
+}
+
+fn generate_single_locale_functions(
+  locale_code: String,
+  translations: Translations,
+) -> String {
+  // Convert trie to dict for generation
+  let dict_translations =
+    trie.fold(
+      translations.translations,
+      dict.new(),
+      fn(dict_acc, key_parts, value) {
+        let key = string.join(key_parts, ".")
+        dict.insert(dict_acc, key, value)
+      },
+    )
+
+  let translations_list =
+    dict_translations
+    |> dict.to_list
+    |> list.map(fn(pair) {
+      "  |> g18n.add_translation(\""
+      <> pair.0
+      <> "\", \""
+      <> escape_string(pair.1)
+      <> "\")"
+    })
+    |> string.join("\n")
+
+  let translations_func =
+    "pub fn "
+    <> locale_code
+    <> "_translations() -> g18n.Translations {\n  g18n.new_translations()\n"
+    <> translations_list
+    <> "\n}"
+
+  let locale_func =
+    "pub fn "
+    <> locale_code
+    <> "_locale() -> locale.Locale {\n  let assert Ok(locale) = locale.new(\""
+    <> string.replace(locale_code, each: "_", with: "-")
+    <> "\")"
+    <> "\nlocale"
+    <> "\n}"
+
+  let translator_func =
+    "pub fn "
+    <> locale_code
+    <> "_translator() -> g18n.Translator {\n  "
+    <> "g18n.new_translator("
+    <> locale_code
+    <> "_locale(), "
+    <> locale_code
+    <> "_translations())\n\n}"
+
+  translations_func <> "\n\n" <> locale_func <> "\n\n" <> translator_func
+}
+
+fn generate_all_locales_function(
+  locale_data: List(#(String, Translations)),
+) -> String {
+  let locale_list =
+    locale_data
+    |> list.map(fn(pair) { "\"" <> pair.0 <> "\"" })
+    |> string.join(", ")
+
+  "pub fn available_locales() -> List(String) {\n  [" <> locale_list <> "]\n}"
+}
+
+fn list_fold_result(
+  list: List(a),
+  initial: b,
+  func: fn(b, a) -> SnagResult(b),
+) -> SnagResult(b) {
+  case list {
+    [] -> Ok(initial)
+    [head, ..tail] -> {
+      case func(initial, head) {
+        Ok(new_acc) -> list_fold_result(tail, new_acc, func)
+        Error(err) -> Error(err)
+      }
+    }
   }
 }
 
@@ -300,7 +1305,10 @@ fn parse_locale(locale_code: String) -> Result(Locale, LocaleError) {
 /// g18n.translate(translator, "hello")
 /// // "Hello"
 /// ```
-pub fn translator(locale: Locale, translations: Translations) -> Translator {
+pub fn new_translator(
+  locale: locale.Locale,
+  translations: Translations,
+) -> Translator {
   Translator(
     locale: locale,
     translations: translations,
@@ -334,7 +1342,7 @@ pub fn translator(locale: Locale, translations: Translations) -> Translator {
 /// ```
 pub fn with_fallback(
   translator: Translator,
-  fallback_locale: Locale,
+  fallback_locale: locale.Locale,
   fallback_translations: Translations,
 ) -> Translator {
   Translator(
@@ -361,20 +1369,20 @@ pub fn with_fallback(
 /// 
 /// let translator = g18n.translator(locale, translations)
 /// 
-/// g18n.translate(translator, "ui.button.save")
+/// g18n.t(translator, "ui.button.save")
 /// // "Save"
 /// 
-/// g18n.translate(translator, "user.greeting") 
+/// g18n.t(translator, "user.greeting") 
 /// // "Hello"
 /// 
-/// g18n.translate(translator, "missing.key")
+/// g18n.t(translator, "missing.key")
 /// // "missing.key" (fallback to key)
 /// ```
 pub fn translate(translator: Translator, key: String) -> String {
   let key_parts = string.split(key, ".")
-  case trie.get(translator.translations, key_parts) {
+  case trie.get(translator.translations.translations, key_parts) {
     Ok(translation) -> translation
-    Error(Nil) -> get_fallback_translation(translator, key_parts, key)
+    Error(Nil) -> fallback_translation(translator, key_parts, key)
   }
 }
 
@@ -396,19 +1404,19 @@ pub fn translate(translator: Translator, key: String) -> String {
 ///   |> g18n.add_param("name", "Alice")
 ///   |> g18n.add_param("count", "5")
 /// 
-/// g18n.translate_with_params(translator, "user.welcome", params)
+/// g18n.t_with_params(translator, "user.welcome", params)
 /// // "Welcome Alice!"
 /// 
-/// g18n.translate_with_params(translator, "user.messages", params)
+/// g18n.t_with_params(translator, "user.messages", params)
 /// // "You have 5 new messages"
 /// ```
 pub fn translate_with_params(
   translator: Translator,
   key: String,
-  params: FormatParams,
+  params params: FormatParams,
 ) -> String {
   let template = translate(translator, key)
-  format_string(template, params)
+  format.format_string(template, params)
 }
 
 /// Translate a key with context for disambiguation.
@@ -429,9 +1437,9 @@ pub fn translate_with_params(
 /// 
 /// let translator = g18n.translator(locale, translations)
 /// 
-/// g18n.translate_with_context(translator, "may", NoContext)         // "may"
-/// g18n.translate_with_context(translator, "may", Context("month"))  // "May"  
-/// g18n.translate_with_context(translator, "may", Context("permission")) // "allowed to"
+/// g18n.t_with_context(translator, "may", NoContext)         // "may"
+/// g18n.t_with_context(translator, "may", Context("month"))  // "May"  
+/// g18n.t_with_context(translator, "may", Context("permission")) // "allowed to"
 /// ```
 pub fn translate_with_context(
   translator: Translator,
@@ -475,57 +1483,7 @@ pub fn translate_with_context_and_params(
   params: FormatParams,
 ) -> String {
   let template = translate_with_context(translator, key, context)
-  format_string(template, params)
-}
-
-/// Add a context-sensitive translation to a translations container.
-///
-/// Helper function to add translations with context using the `key@context` format.
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_context_translation("bank", "financial", "financial institution")
-///   |> g18n.add_context_translation("bank", "river", "riverbank")
-///   |> g18n.add_context_translation("bank", "turn", "lean to one side")
-/// ```
-pub fn add_context_translation(
-  translations: Translations,
-  key: String,
-  context: String,
-  value: String,
-) -> Translations {
-  let context_key = key <> "@" <> context
-  add_translation(translations, context_key, value)
-}
-
-/// Get all context variants for a given base key.
-///
-/// Returns all translations that match the base key with different contexts.
-/// Useful for discovering available contexts for a particular key.
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("bank", "bank")
-///   |> g18n.add_context_translation("bank", "financial", "financial institution")
-///   |> g18n.add_context_translation("bank", "river", "riverbank")
-/// 
-/// g18n.get_context_variants(translations, "bank")
-/// // [#("bank", "bank"), #("bank@financial", "financial institution"), #("bank@river", "riverbank")]
-/// ```
-pub fn get_context_variants(
-  translations: Translations,
-  base_key: String,
-) -> List(#(String, String)) {
-  trie.fold(translations, [], fn(acc, key_parts, value) {
-    let full_key = string.join(key_parts, ".")
-    case string.starts_with(full_key, base_key) {
-      True -> [#(full_key, value), ..acc]
-      False -> acc
-    }
-  })
-  |> list.reverse
+  format.format_string(template, params)
 }
 
 /// Translate with automatic pluralization based on count and locale rules.
@@ -565,10 +1523,14 @@ pub fn translate_plural(
   key: String,
   count: Int,
 ) -> String {
-  let language = translator.locale.language
-  let plural_rule = get_locale_plural_rule(language)
-  let plural_key = get_plural_key(key, count, plural_rule)
-  translate(translator, plural_key)
+  let language = translator.locale
+  let plural_rule = locale.locale_plural_rule(language)
+  let plural_key = locale.plural_key(key, count, plural_rule)
+  let template = translate(translator, plural_key)
+
+  // Automatically substitute the {count} parameter
+  let params = dict.new() |> dict.insert("count", int.to_string(count))
+  format.format_string(template, params)
 }
 
 /// Translate with pluralization and parameter substitution.
@@ -586,15 +1548,20 @@ pub fn translate_plural(
 /// 
 /// g18n.translate_plural_with_params(en_translator, "user.items", 1, params) 
 /// // "Alice has 1 item"
-/// ```
 pub fn translate_plural_with_params(
   translator: Translator,
   key: String,
   count: Int,
   params: FormatParams,
 ) -> String {
-  let template = translate_plural(translator, key, count)
-  format_string(template, params)
+  let language = translator.locale
+  let plural_rule = locale.locale_plural_rule(language)
+  let plural_key = locale.plural_key(key, count, plural_rule)
+  let template = translate(translator, plural_key)
+
+  // Add count parameter and merge with provided params
+  let all_params = params |> dict.insert("count", int.to_string(count))
+  format.format_string(template, all_params)
 }
 
 /// Get the locale from a translator.
@@ -605,7 +1572,7 @@ pub fn translate_plural_with_params(
 /// let translator = g18n.translator(locale, g18n.translations())
 /// g18n.get_locale(translator) // Locale(language: "en", region: Some("US"))
 /// ```
-pub fn get_locale(translator: Translator) -> Locale {
+pub fn locale(translator: Translator) -> locale.Locale {
   translator.locale
 }
 
@@ -619,7 +1586,7 @@ pub fn get_locale(translator: Translator) -> Locale {
 ///   |> g18n.with_fallback(en, g18n.translations())
 /// g18n.get_fallback_locale(translator) // Some(Locale(language: "en", region: None))
 /// ```
-pub fn get_fallback_locale(translator: Translator) -> Option(Locale) {
+pub fn fallback_locale(translator: Translator) -> Option(locale.Locale) {
   translator.fallback_locale
 }
 
@@ -632,7 +1599,7 @@ pub fn get_fallback_locale(translator: Translator) -> Option(Locale) {
 /// let translator = g18n.translator(g18n.locale("en"), translations)
 /// g18n.get_translations(translator) // Returns the translations container
 /// ```
-pub fn get_translations(translator: Translator) -> Translations {
+pub fn translations(translator: Translator) -> Translations {
   translator.translations
 }
 
@@ -646,217 +1613,24 @@ pub fn get_translations(translator: Translator) -> Translations {
 ///   |> g18n.with_fallback(g18n.locale("en"), en_translations)
 /// g18n.get_fallback_translations(translator) // Some(translations)
 /// ```
-pub fn get_fallback_translations(translator: Translator) -> Option(Translations) {
+pub fn fallback_translations(translator: Translator) -> Option(Translations) {
   translator.fallback_translations
 }
 
-fn get_fallback_translation(
+fn fallback_translation(
   translator: Translator,
   key_parts: List(String),
   original_key: String,
 ) -> String {
   case translator.fallback_translations {
     Some(fallback_trans) -> {
-      case trie.get(fallback_trans, key_parts) {
+      case trie.get(fallback_trans.translations, key_parts) {
         Ok(translation) -> translation
         Error(Nil) -> original_key
       }
     }
     None -> original_key
   }
-}
-
-// Locale Negotiation
-/// Negotiate the best locale match from available options.
-///
-/// Given a list of available locales and user preferences, returns the best match
-/// using standard locale negotiation algorithms. Prefers exact matches, falls back
-/// to language matches, then to region-less matches.
-///
-/// ## Examples
-/// ```gleam
-/// let available = [
-///   locale("en"), locale("en-US"), locale("es"), locale("fr")
-/// ]
-/// let preferred = [locale("en-GB"), locale("es"), locale("de")]
-/// 
-/// g18n.negotiate_locale(available, preferred)
-/// // Returns Some(locale("en")) - language match for en-GB
-/// ```
-pub fn negotiate_locale(
-  available: List(Result(Locale, LocaleError)),
-  preferred: List(Result(Locale, LocaleError)),
-) -> Option(Locale) {
-  let available_locales =
-    list.filter_map(available, fn(x) { result.try(x, Ok) })
-  let preferred_locales =
-    list.filter_map(preferred, fn(x) { result.try(x, Ok) })
-
-  case preferred_locales {
-    [] ->
-      case list.first(available_locales) {
-        Ok(locale) -> Some(locale)
-        Error(Nil) -> None
-      }
-    [first_pref, ..rest_prefs] -> {
-      // Try exact match first
-      case find_exact_match(available_locales, first_pref) {
-        Some(match) -> Some(match)
-        None -> {
-          // Try language match
-          case find_language_match(available_locales, first_pref) {
-            Some(match) -> Some(match)
-            None -> {
-              // Try region fallback (en-US -> en)
-              case find_region_fallback(available_locales, first_pref) {
-                Some(match) -> Some(match)
-                None -> {
-                  let rest_results = list.map(rest_prefs, fn(loc) { Ok(loc) })
-                  negotiate_locale(available, rest_results)
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-/// Parse Accept-Language header for locale negotiation.
-///
-/// Parses HTTP Accept-Language header format and returns ordered list of locales
-/// by preference (quality values considered).
-///
-/// ## Examples  
-/// ```gleam
-/// g18n.parse_accept_language("en-US,en;q=0.9,fr;q=0.8")
-/// // [Ok(Locale("en", Some("US"))), Ok(Locale("en", None)), Ok(Locale("fr", None))]
-/// ```
-pub fn parse_accept_language(
-  header: String,
-) -> List(Result(Locale, LocaleError)) {
-  header
-  |> string.split(",")
-  |> list.map(string.trim)
-  |> list.filter(fn(s) { s != "" })
-  |> list.map(fn(lang_spec) {
-    case string.split(lang_spec, ";") {
-      [] -> Error(InvalidLocale("Empty language specification"))
-      [locale_code] -> locale(locale_code)
-      [locale_code, ..] -> locale(locale_code)
-    }
-  })
-}
-
-/// Get quality score for locale preference ordering.
-///
-/// Used internally for locale negotiation scoring. Higher scores indicate
-/// better matches.
-pub fn get_locale_quality_score(preferred: Locale, available: Locale) -> Float {
-  case locales_exact_match(preferred, available) {
-    True -> 1.0
-    False ->
-      case locales_match_language(preferred, available) {
-        True -> 0.8
-        False -> 0.0
-      }
-  }
-}
-
-fn find_exact_match(
-  available: List(Locale),
-  preferred: Locale,
-) -> Option(Locale) {
-  case list.find(available, fn(loc) { locales_exact_match(loc, preferred) }) {
-    Ok(locale) -> Some(locale)
-    Error(Nil) -> None
-  }
-}
-
-fn find_language_match(
-  available: List(Locale),
-  preferred: Locale,
-) -> Option(Locale) {
-  case
-    list.find(available, fn(loc) { locales_match_language(loc, preferred) })
-  {
-    Ok(locale) -> Some(locale)
-    Error(Nil) -> None
-  }
-}
-
-fn find_region_fallback(
-  available: List(Locale),
-  preferred: Locale,
-) -> Option(Locale) {
-  let lang_only = locale_language_only(preferred)
-  case list.find(available, fn(loc) { locales_exact_match(loc, lang_only) }) {
-    Ok(locale) -> Some(locale)
-    Error(Nil) -> None
-  }
-}
-
-// Translation Management
-/// Create a new empty translations container.
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("hello", "Hello")
-///   |> g18n.add_translation("goodbye", "Goodbye")
-/// ```
-pub fn translations() -> Translations {
-  trie.new()
-}
-
-/// Add a translation key-value pair to a translations container.
-///
-/// Supports hierarchical keys using dot notation for organization.
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("ui.button.save", "Save")
-///   |> g18n.add_translation("ui.button.cancel", "Cancel")
-///   |> g18n.add_translation("user.name", "Name")
-/// ```
-pub fn add_translation(
-  translations: Translations,
-  key: String,
-  value: String,
-) -> Translations {
-  let key_parts = string.split(key, ".")
-  trie.insert(translations, key_parts, value)
-}
-
-/// Get all translation keys that start with a given prefix.
-///
-/// Useful for finding all keys within a specific namespace.
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("ui.button.save", "Save")
-///   |> g18n.add_translation("ui.button.cancel", "Cancel")
-///   |> g18n.add_translation("user.name", "Name")
-/// 
-/// g18n.get_keys_with_prefix(translations, "ui.button")
-/// // ["ui.button.save", "ui.button.cancel"]
-/// ```
-pub fn get_keys_with_prefix(
-  translations: Translations,
-  prefix: String,
-) -> List(String) {
-  let prefix_parts = string.split(prefix, ".")
-  trie.fold(translations, [], fn(acc, key_parts, _value) {
-    let full_key = string.join(key_parts, ".")
-    case has_prefix(key_parts, prefix_parts) {
-      True -> [full_key, ..acc]
-      False -> acc
-    }
-  })
-  |> list.reverse
 }
 
 /// Get all key-value pairs from translations within a specific namespace.
@@ -874,408 +1648,20 @@ pub fn get_keys_with_prefix(
 /// g18n.get_namespace(translator, "ui.button")
 /// // [#("ui.button.save", "Save"), #("ui.button.cancel", "Cancel")]
 /// ```
-pub fn get_namespace(
+pub fn namespace(
   translator: Translator,
   namespace: String,
 ) -> List(#(String, String)) {
   let prefix_parts = string.split(namespace, ".")
-  trie.fold(translator.translations, [], fn(acc, key_parts, value) {
+  trie.fold(translator.translations.translations, [], fn(acc, key_parts, value) {
     let full_key = string.join(key_parts, ".")
-    case has_prefix(key_parts, prefix_parts) {
+    case helpers.has_prefix(key_parts, prefix_parts) {
       True -> [#(full_key, value), ..acc]
       False -> acc
     }
   })
   |> list.reverse
 }
-
-// Helper function to check if a key has a given prefix
-fn has_prefix(key_parts: List(String), prefix_parts: List(String)) -> Bool {
-  case prefix_parts, key_parts {
-    [], _ -> True
-    [prefix_head, ..prefix_tail], [key_head, ..key_tail]
-      if prefix_head == key_head
-    -> has_prefix(key_tail, prefix_tail)
-    _, _ -> False
-  }
-}
-
-// Format Functions
-/// Create a new empty parameter container for string formatting.
-///
-/// ## Examples
-/// ```gleam
-/// let params = g18n.format_params()
-///   |> g18n.add_param("name", "Alice")
-///   |> g18n.add_param("count", "5")
-/// ```
-pub fn format_params() -> FormatParams {
-  dict.new()
-}
-
-/// Add a parameter key-value pair to a format parameters container.
-///
-/// Used for template substitution in translations.
-///
-/// ## Examples
-/// ```gleam
-/// let params = g18n.format_params()
-///   |> g18n.add_param("user", "Alice")
-///   |> g18n.add_param("item_count", "3")
-/// ```
-pub fn add_param(
-  params: FormatParams,
-  key: String,
-  value: String,
-) -> FormatParams {
-  dict.insert(params, key, value)
-}
-
-/// Perform parameter substitution in a template string.
-///
-/// Replaces {param} placeholders with actual values from the parameters.
-///
-/// ## Examples
-/// ```gleam
-/// let params = g18n.format_params()
-///   |> g18n.add_param("name", "Alice")
-///   |> g18n.add_param("count", "5")
-/// 
-/// g18n.format_string("Hello {name}, you have {count} messages", params)
-/// // "Hello Alice, you have 5 messages"
-/// ```
-pub fn format_string(template: String, params: FormatParams) -> String {
-  dict.fold(params, template, fn(acc, key, value) {
-    string.replace(acc, "{" <> key <> "}", value)
-  })
-}
-
-/// Extract all parameter placeholders from a template string.
-///
-/// Returns a list of parameter names found within {braces}.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.extract_placeholders("Hello {name}, you have {count} new {type}")
-/// // ["name", "count", "type"]
-/// ```
-pub fn extract_placeholders(template: String) -> List(String) {
-  let assert Ok(placeholder_regex) = regexp.from_string("\\{([^}]+)\\}")
-
-  regexp.scan(placeholder_regex, template)
-  |> list_map(fn(match) {
-    case match.submatches {
-      [Some(placeholder)] -> placeholder
-      _ -> ""
-    }
-  })
-  |> list_filter(fn(placeholder) { placeholder != "" })
-}
-
-// Plural Functions
-/// Implement English pluralization rules.
-///
-/// Returns One for count=1, Other for all other counts.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.english_plural_rule(1) // One
-/// g18n.english_plural_rule(2) // Other
-/// g18n.english_plural_rule(0) // Other
-/// ```
-pub fn english_plural_rule(count: Int) -> PluralRule {
-  case count {
-    1 -> One
-    _ -> Other
-  }
-}
-
-/// Implement Portuguese pluralization rules.
-///
-/// Returns Zero for count=0, One for count=1, Other for all other counts.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.portuguese_plural_rule(0) // Zero
-/// g18n.portuguese_plural_rule(1) // One
-/// g18n.portuguese_plural_rule(5) // Other
-/// ```
-pub fn portuguese_plural_rule(count: Int) -> PluralRule {
-  case count {
-    0 -> Zero
-    1 -> One
-    _ -> Other
-  }
-}
-
-/// Implement complex Russian pluralization rules.
-///
-/// Handles Slavic plural forms (One/Few/Many) based on modular arithmetic.
-/// One: ends in 1, but not 11
-/// Few: ends in 2-4, but not 12-14  
-/// Many: all other cases
-///
-/// ## Examples
-/// ```gleam
-/// g18n.russian_plural_rule(1)  // One
-/// g18n.russian_plural_rule(2)  // Few
-/// g18n.russian_plural_rule(5)  // Many
-/// g18n.russian_plural_rule(11) // Many
-/// ```
-pub fn russian_plural_rule(count: Int) -> PluralRule {
-  let mod_10 = count % 10
-  let mod_100 = count % 100
-
-  case mod_10, mod_100 {
-    1, n if n != 11 -> One
-    v, n if v >= 2 && v <= 4 && n < 12 || n > 14 -> Few
-    _, _ -> Many
-  }
-}
-
-/// Implement Spanish pluralization rules.
-///
-/// Returns One for count=1, Other for all other counts.
-/// Similar to English but explicitly implemented for clarity.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.spanish_plural_rule(1) // One
-/// g18n.spanish_plural_rule(0) // Other
-/// g18n.spanish_plural_rule(5) // Other
-/// ```
-pub fn spanish_plural_rule(count: Int) -> PluralRule {
-  case count {
-    1 -> One
-    _ -> Other
-  }
-}
-
-/// Implement French pluralization rules.
-///
-/// Returns One for count=0 and count=1, Other for all other counts.
-/// French treats 0 as singular (0 élément vs 2 éléments).
-///
-/// ## Examples
-/// ```gleam
-/// g18n.french_plural_rule(0) // One
-/// g18n.french_plural_rule(1) // One
-/// g18n.french_plural_rule(2) // Other
-/// ```
-pub fn french_plural_rule(count: Int) -> PluralRule {
-  case count {
-    0 | 1 -> One
-    _ -> Other
-  }
-}
-
-/// Implement German pluralization rules.
-///
-/// Returns One for count=1, Other for all other counts.
-/// Similar to English pattern.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.german_plural_rule(1) // One
-/// g18n.german_plural_rule(0) // Other
-/// g18n.german_plural_rule(3) // Other
-/// ```
-pub fn german_plural_rule(count: Int) -> PluralRule {
-  case count {
-    1 -> One
-    _ -> Other
-  }
-}
-
-/// Implement Italian pluralization rules.
-///
-/// Returns One for count=1, Other for all other counts.
-/// Similar to English pattern.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.italian_plural_rule(1) // One
-/// g18n.italian_plural_rule(0) // Other
-/// g18n.italian_plural_rule(2) // Other
-/// ```
-pub fn italian_plural_rule(count: Int) -> PluralRule {
-  case count {
-    1 -> One
-    _ -> Other
-  }
-}
-
-/// Implement Arabic pluralization rules.
-///
-/// Arabic has complex pluralization with 6 forms:
-/// Zero: 0
-/// One: 1  
-/// Two: 2
-/// Few: 3-10
-/// Many: 11-99
-/// Other: 100+ and fractional
-///
-/// ## Examples
-/// ```gleam
-/// g18n.arabic_plural_rule(0)   // Zero
-/// g18n.arabic_plural_rule(1)   // One
-/// g18n.arabic_plural_rule(2)   // Two
-/// g18n.arabic_plural_rule(5)   // Few
-/// g18n.arabic_plural_rule(15)  // Many
-/// g18n.arabic_plural_rule(100) // Other
-/// ```
-pub fn arabic_plural_rule(count: Int) -> PluralRule {
-  case count {
-    0 -> Zero
-    1 -> One
-    2 -> Two
-    n if n >= 3 && n <= 10 -> Few
-    n if n >= 11 && n <= 99 -> Many
-    _ -> Other
-  }
-}
-
-/// Implement Chinese pluralization rules.
-///
-/// Chinese doesn't have grammatical pluralization - same form for all counts.
-/// Uses Other for all numbers for consistency with the system.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.chinese_plural_rule(1)  // Other
-/// g18n.chinese_plural_rule(0)  // Other
-/// g18n.chinese_plural_rule(10) // Other
-/// ```
-pub fn chinese_plural_rule(_count: Int) -> PluralRule {
-  // Chinese has no plural forms
-  Other
-}
-
-/// Implement Japanese pluralization rules.
-///
-/// Japanese doesn't have grammatical pluralization - same form for all counts.
-/// Uses Other for all numbers for consistency with the system.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.japanese_plural_rule(1)  // Other
-/// g18n.japanese_plural_rule(0)  // Other
-/// g18n.japanese_plural_rule(10) // Other
-/// ```
-pub fn japanese_plural_rule(_count: Int) -> PluralRule {
-  // Japanese has no plural forms
-  Other
-}
-
-/// Implement Korean pluralization rules.
-///
-/// Korean doesn't have strict grammatical pluralization like European languages.
-/// Uses Other for all numbers for consistency with the system.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.korean_plural_rule(1)  // Other
-/// g18n.korean_plural_rule(0)  // Other
-/// g18n.korean_plural_rule(10) // Other
-/// ```
-pub fn korean_plural_rule(_count: Int) -> PluralRule {
-  // Korean has no strict plural forms
-  Other
-}
-
-/// Implement Hindi pluralization rules.
-///
-/// Hindi has simple pluralization: One for 0 and 1, Other for everything else.
-/// This covers the basic singular/plural distinction in Hindi.
-///
-/// ## Examples
-/// ```gleam
-/// g18n.hindi_plural_rule(0) // One
-/// g18n.hindi_plural_rule(1) // One
-/// g18n.hindi_plural_rule(2) // Other
-/// ```
-pub fn hindi_plural_rule(count: Int) -> PluralRule {
-  case count {
-    0 | 1 -> One
-    _ -> Other
-  }
-}
-
-/// Generate a pluralized key based on count and plural rules.
-///
-/// Takes a base translation key and appends the appropriate plural suffix
-/// (.zero, .one, .two, .few, .many, .other) based on the count and the 
-/// provided plural rule function.
-///
-/// ## Examples
-/// ```gleam
-/// let en_rule = g18n.get_locale_plural_rule("en")
-/// 
-/// g18n.get_plural_key("item", 1, en_rule)  // "item.one"
-/// g18n.get_plural_key("item", 5, en_rule)  // "item.other"
-/// g18n.get_plural_key("item", 0, en_rule)  // "item.other"
-/// ```
-pub fn get_plural_key(
-  base_key: String,
-  count: Int,
-  plural_rule: PluralRules,
-) -> String {
-  let rule = plural_rule(count)
-  case rule {
-    Zero -> base_key <> ".zero"
-    One -> base_key <> ".one"
-    Two -> base_key <> ".two"
-    Few -> base_key <> ".few"
-    Many -> base_key <> ".many"
-    Other -> base_key <> ".other"
-  }
-}
-
-/// Get the plural rule function for a specific language.
-///
-/// Returns the appropriate pluralization rule function based on the language code.
-/// Supports all 12 languages with proper pluralization rules.
-///
-/// ## Supported Languages
-/// - English ("en"): One/Other
-/// - Spanish ("es"): One/Other  
-/// - Portuguese ("pt"): Zero/One/Other
-/// - French ("fr"): One (0,1)/Other
-/// - German ("de"): One/Other
-/// - Italian ("it"): One/Other
-/// - Russian ("ru"): One/Few/Many (complex Slavic rules)
-/// - Arabic ("ar"): Zero/One/Two/Few/Many/Other (6 forms)
-/// - Chinese ("zh"): Other only (no pluralization)
-/// - Japanese ("ja"): Other only (no pluralization)
-/// - Korean ("ko"): Other only (no pluralization)
-/// - Hindi ("hi"): One (0,1)/Other
-///
-/// ## Examples
-/// ```gleam
-/// let en_rule = g18n.get_locale_plural_rule("en")
-/// let ar_rule = g18n.get_locale_plural_rule("ar")
-/// let fallback_rule = g18n.get_locale_plural_rule("unknown")  // Uses English rules
-/// ```
-pub fn get_locale_plural_rule(language: String) -> PluralRules {
-  case language {
-    "en" -> english_plural_rule
-    "es" -> spanish_plural_rule
-    "pt" -> portuguese_plural_rule
-    "fr" -> french_plural_rule
-    "de" -> german_plural_rule
-    "it" -> italian_plural_rule
-    "ru" -> russian_plural_rule
-    "ar" -> arabic_plural_rule
-    "zh" -> chinese_plural_rule
-    "ja" -> japanese_plural_rule
-    "ko" -> korean_plural_rule
-    "hi" -> hindi_plural_rule
-    _ -> english_plural_rule
-    // Fallback to English for unsupported languages
-  }
-}
-
-// Advanced Pluralization Functions
 
 /// Translate with cardinal pluralization rules.
 ///
@@ -1315,9 +1701,9 @@ pub fn translate_ordinal(
   key: String,
   position: Int,
 ) -> String {
-  let language = translator.locale.language
-  let ordinal_rule = get_ordinal_rule(language, position)
-  let ordinal_key = get_ordinal_key(key, ordinal_rule)
+  let language = translator.locale
+  let ordinal_rule = locale.ordinal_rule(language, position)
+  let ordinal_key = locale.ordinal_key(key, ordinal_rule)
   translate(translator, ordinal_key)
 }
 
@@ -1375,9 +1761,9 @@ pub fn translate_ordinal_with_params(
     |> dict.insert("position", int.to_string(position))
     |> dict.insert(
       "ordinal",
-      get_ordinal_suffix(translator.locale.language, position),
+      locale.ordinal_suffix(translator.locale, position),
     )
-  format_string(template, enhanced_params)
+  format.format_string(template, enhanced_params)
 }
 
 /// Translate numeric ranges with parameter substitution.
@@ -1390,11 +1776,11 @@ pub fn translate_ordinal_with_params(
 /// ```gleam
 /// let params = dict.from_list([("type", "chapters")])
 /// 
-/// g18n.translate_range_with_params(en_translator, "content", 1, 5, params)
+/// g18n.t_range_with_params(en_translator, "content", 1, 5, params)
 /// // Template: "Reading {type} {from} to {to} ({total} total)"
 /// // Result: "Reading chapters 1 to 5 (5 total)"
 /// 
-/// g18n.translate_range_with_params(en_translator, "content", 3, 3, params) 
+/// g18n.t_range_with_params(en_translator, "content", 3, 3, params) 
 /// // Uses .single key, Result: "Reading chapter 3"
 /// ```
 pub fn translate_range_with_params(
@@ -1410,75 +1796,7 @@ pub fn translate_range_with_params(
     |> dict.insert("from", int.to_string(from))
     |> dict.insert("to", int.to_string(to))
     |> dict.insert("total", int.to_string(to - from + 1))
-  format_string(template, enhanced_params)
-}
-
-// Ordinal rule functions
-fn get_ordinal_rule(language: String, position: Int) -> OrdinalRule {
-  case language {
-    "en" -> english_ordinal_rule(position)
-    _ -> english_ordinal_rule(position)
-  }
-}
-
-fn english_ordinal_rule(position: Int) -> OrdinalRule {
-  let mod_100 = position % 100
-  let mod_10 = position % 10
-
-  case mod_100 {
-    11 | 12 | 13 -> Nth
-    _ ->
-      case mod_10 {
-        1 -> First
-        2 -> Second
-        3 -> Third
-        _ -> Nth
-      }
-  }
-}
-
-fn get_ordinal_key(base_key: String, ordinal_rule: OrdinalRule) -> String {
-  case ordinal_rule {
-    First -> base_key <> ".first"
-    Second -> base_key <> ".second"
-    Third -> base_key <> ".third"
-    Nth -> base_key <> ".nth"
-  }
-}
-
-fn get_ordinal_suffix(language: String, position: Int) -> String {
-  case language {
-    "en" -> english_ordinal_suffix(position)
-    _ -> string.inspect(position)
-  }
-}
-
-fn english_ordinal_suffix(position: Int) -> String {
-  let mod_100 = position % 100
-  let mod_10 = position % 10
-
-  let suffix = case mod_100 {
-    11 | 12 | 13 -> "th"
-    _ ->
-      case mod_10 {
-        1 -> "st"
-        2 -> "nd"
-        3 -> "rd"
-        _ -> "th"
-      }
-  }
-
-  int.to_string(position) <> suffix
-}
-
-// Number Formatting Types and Functions
-pub type NumberFormat {
-  Decimal(precision: Int)
-  Currency(currency_code: String, precision: Int)
-  Percentage(precision: Int)
-  Scientific(precision: Int)
-  Compact
-  // 1.2K, 3.4M, 1.2B
+  format.format_string(template, enhanced_params)
 }
 
 /// Format numbers according to locale-specific conventions and format type.
@@ -1529,231 +1847,15 @@ pub fn format_number(
   number: Float,
   format: NumberFormat,
 ) -> String {
-  let language = translator.locale.language
+  let language = translator |> locale |> locale.language
   case format {
-    Decimal(precision) -> format_decimal(number, precision, language)
+    Decimal(precision) -> decimal(number, precision, language)
     Currency(currency_code, precision) ->
-      format_currency(number, currency_code, precision, language)
-    Percentage(precision) -> format_percentage(number, precision, language)
-    Scientific(precision) -> format_scientific(number, precision)
-    Compact -> format_compact(number, language)
+      currency(number, currency_code, precision, language)
+    Percentage(precision) -> percentage(number, precision, language)
+    Scientific(precision) -> scientific(number, precision)
+    Compact -> compact(number, language)
   }
-}
-
-/// Format a number as a decimal with locale-specific decimal and thousands separators.
-/// 
-/// ## Examples
-/// ```gleam
-/// format_decimal(1234.5678, 2, "en")    // "1,234.57"
-/// format_decimal(1234.5678, 2, "pt")    // "1.234,57"
-/// format_decimal(1000.0, 0, "en")       // "1,000"
-/// ```
-pub fn format_decimal(number: Float, precision: Int, language: String) -> String {
-  let decimal_separator = get_decimal_separator(language)
-  let thousands_separator = get_thousands_separator(language)
-
-  let formatted_number =
-    float.to_precision(number, precision) |> float.to_string
-  add_thousands_separators(
-    formatted_number,
-    decimal_separator,
-    thousands_separator,
-  )
-}
-
-/// Format a number as currency with locale-specific formatting and currency symbol positioning.
-/// 
-/// ## Examples
-/// ```gleam
-/// format_currency(1234.56, "USD", 2, "en")  // "$1,234.56"
-/// format_currency(1234.56, "EUR", 2, "pt")  // "1.234,56 €"
-/// format_currency(50.0, "GBP", 2, "en")     // "£50.00"
-/// ```
-pub fn format_currency(
-  number: Float,
-  currency_code: String,
-  precision: Int,
-  language: String,
-) -> String {
-  let formatted_amount = format_decimal(number, precision, language)
-  let currency_symbol = get_currency_symbol(currency_code)
-  let currency_position = get_currency_position(language)
-
-  case currency_position {
-    "before" -> currency_symbol <> formatted_amount
-    "after" -> formatted_amount <> " " <> currency_symbol
-    _ -> currency_symbol <> formatted_amount
-  }
-}
-
-/// Format a decimal number as a percentage with locale-specific formatting.
-/// The input number is multiplied by 100 and formatted with a percent symbol.
-/// 
-/// ## Examples
-/// ```gleam
-/// format_percentage(0.1234, 2, "en")   // "12.34%"
-/// format_percentage(0.75, 1, "fr")     // "75.0 %"
-/// format_percentage(0.5, 0, "en")      // "50%"
-/// ```
-pub fn format_percentage(
-  number: Float,
-  precision: Int,
-  language: String,
-) -> String {
-  let percentage_value = number *. 100.0
-  let formatted = format_decimal(percentage_value, precision, language)
-  let percent_symbol = get_percent_symbol()
-
-  case language {
-    "fr" -> formatted <> " " <> percent_symbol
-    _ -> formatted <> percent_symbol
-  }
-}
-
-/// Format a number in scientific notation with the specified precision.
-/// Note: This is a simplified implementation that could be enhanced with proper locale support.
-/// 
-/// ## Examples
-/// ```gleam
-/// format_scientific(1234.0, 2)     // "1234.00E+00"
-/// format_scientific(0.00123, 3)    // "0.001E+00"
-/// ```
-pub fn format_scientific(number: Float, precision: Int) -> String {
-  // Basic scientific notation - could be enhanced with proper locale support
-  let formatted = float.to_precision(number, precision) |> float.to_string
-  formatted <> "E+00"
-  // Simplified for now
-}
-
-/// Format large numbers in compact notation using locale-specific suffixes.
-/// Numbers are abbreviated with suffixes like K, M, B for thousands, millions, billions.
-/// 
-/// ## Examples
-/// ```gleam
-/// format_compact(1500.0, "en")           // "1.5K"
-/// format_compact(2500000.0, "en")        // "2.5M"
-/// format_compact(3200000000.0, "en")     // "3.2B"
-/// format_compact(500.0, "en")            // "500"
-/// ```
-pub fn format_compact(number: Float, language: String) -> String {
-  case number {
-    n if n >=. 1_000_000_000.0 -> {
-      let billions = n /. 1_000_000_000.0
-      float.to_precision(billions, 1) |> float.to_string
-      <> get_billion_suffix(language)
-    }
-    n if n >=. 1_000_000.0 -> {
-      let millions = n /. 1_000_000.0
-      float.to_precision(millions, 1) |> float.to_string
-      <> get_million_suffix(language)
-    }
-    n if n >=. 1000.0 -> {
-      let thousands = n /. 1000.0
-      float.to_precision(thousands, 1) |> float.to_string
-      <> get_thousand_suffix(language)
-    }
-    _ -> int.to_string(float.round(number))
-  }
-}
-
-// Locale-specific formatting helpers
-fn get_decimal_separator(language: String) -> String {
-  case language {
-    "pt" | "es" | "fr" | "de" -> ","
-    _ -> "."
-  }
-}
-
-fn get_thousands_separator(language: String) -> String {
-  case language {
-    "pt" | "es" -> "."
-    "fr" -> " "
-    "de" -> ","
-    _ -> ","
-  }
-}
-
-fn get_currency_symbol(currency_code: String) -> String {
-  case currency_code {
-    "USD" -> "$"
-    "EUR" -> "€"
-    "GBP" -> "£"
-    "BRL" -> "R$"
-    "JPY" -> "¥"
-    _ -> currency_code
-  }
-}
-
-fn get_currency_position(language: String) -> String {
-  case language {
-    "en" -> "before"
-    "pt" | "es" | "fr" -> "before"
-    "de" -> "after"
-    _ -> "before"
-  }
-}
-
-fn get_percent_symbol() -> String {
-  "%"
-}
-
-fn get_thousand_suffix(language: String) -> String {
-  case language {
-    "pt" -> "mil"
-    "es" -> "k"
-    "fr" -> "k"
-    _ -> "K"
-  }
-}
-
-fn get_million_suffix(language: String) -> String {
-  case language {
-    "pt" -> "M"
-    "es" -> "M"
-    "fr" -> "M"
-    _ -> "M"
-  }
-}
-
-fn get_billion_suffix(language: String) -> String {
-  case language {
-    "pt" -> "B"
-    "es" -> "B"
-    "fr" -> "Md"
-    _ -> "B"
-  }
-}
-
-fn add_thousands_separators(
-  number_str: String,
-  _decimal_separator: String,
-  _thousands_separator: String,
-) -> String {
-  // Simplified implementation - would need proper number parsing in production
-  number_str
-}
-
-pub type DateTimeFormat {
-  Short
-  // 12/25/23, 3:45 PM
-  Medium
-  // Dec 25, 2023, 3:45:30 PM  
-  Long
-  // December 25, 2023, 3:45:30 PM GMT
-  Full
-  // Monday, December 25, 2023, 3:45:30 PM GMT
-  Custom(String)
-  // "YYYY-MM-DD HH:mm:ss"
-}
-
-pub type RelativeDuration {
-  Seconds(Int)
-  Minutes(Int)
-  Hours(Int)
-  Days(Int)
-  Weeks(Int)
-  Months(Int)
-  Years(Int)
 }
 
 /// Format a date according to the translator's locale and specified format.
@@ -1805,13 +1907,13 @@ pub fn format_date(
   date: calendar.Date,
   format: DateTimeFormat,
 ) -> String {
-  let language = translator.locale.language
+  let language = translator |> locale |> locale.language
   case format {
-    Short -> format_date_short(date, language)
-    Medium -> format_date_medium(date, language)
-    Long -> format_date_long(date, language)
-    Full -> format_date_full(date, language)
-    Custom(pattern) -> format_date_custom(date, pattern)
+    Short -> date_short(date, language)
+    Medium -> date_medium(date, language)
+    Long -> date_long(date, language)
+    Full -> date_full(date, language)
+    Custom(pattern) -> date_custom(date, pattern)
   }
 }
 
@@ -1853,13 +1955,13 @@ pub fn format_time(
   time: calendar.TimeOfDay,
   format: DateTimeFormat,
 ) -> String {
-  let language = translator.locale.language
+  let language = translator |> locale |> locale.language
   case format {
-    Short -> format_time_short(time, language)
-    Medium -> format_time_medium(time, language)
-    Long -> format_time_long(time, language)
-    Full -> format_time_full(time, language)
-    Custom(pattern) -> format_time_custom(time, pattern)
+    Short -> time_short(time, language)
+    Medium -> time_medium(time, language)
+    Long -> time_long(time, language)
+    Full -> time_full(time, language)
+    Custom(pattern) -> time_custom(time, pattern)
   }
 }
 
@@ -1912,19 +2014,14 @@ pub fn format_datetime(
   time: calendar.TimeOfDay,
   format: DateTimeFormat,
 ) -> String {
-  let language = translator.locale.language
+  let language = translator |> locale |> locale.language
   case format {
-    Short -> format_datetime_short(date, time, language)
-    Medium -> format_datetime_medium(date, time, language)
-    Long -> format_datetime_long(date, time, language)
-    Full -> format_datetime_full(date, time, language)
-    Custom(pattern) -> format_datetime_custom(date, time, pattern)
+    Short -> datetime_short(date, time, language)
+    Medium -> datetime_medium(date, time, language)
+    Long -> datetime_long(date, time, language)
+    Full -> datetime_full(date, time, language)
+    Custom(pattern) -> datetime_custom(date, time, pattern)
   }
-}
-
-pub type TimeRelative {
-  Past
-  Future
 }
 
 /// Format relative time expressions like "2 hours ago" or "in 5 minutes".
@@ -1980,7 +2077,7 @@ pub fn format_relative_time(
   duration: RelativeDuration,
   relative: TimeRelative,
 ) -> String {
-  let language = translator.locale.language
+  let language = translator |> locale |> locale.language
   let _ = case relative {
     Past -> "ago"
     Future -> "in"
@@ -2026,8 +2123,199 @@ pub fn format_relative_time(
   }
 }
 
+fn decimal(number: Float, precision: Int, language: String) -> String {
+  let decimal_separator = decimal_separator(language)
+  let thousands_separator = thousands_separator(language)
+
+  let formatted_number =
+    float.to_precision(number, precision) |> float.to_string
+  add_thousands_separators(
+    formatted_number,
+    decimal_separator,
+    thousands_separator,
+  )
+}
+
+fn currency(
+  number: Float,
+  currency_code: String,
+  precision: Int,
+  language: String,
+) -> String {
+  let formatted_amount = decimal(number, precision, language)
+  let currency_symbol = currency_symbol(currency_code)
+  let currency_position = currency_position(language)
+
+  case currency_position {
+    "before" -> currency_symbol <> formatted_amount
+    "after" -> formatted_amount <> " " <> currency_symbol
+    _ -> currency_symbol <> formatted_amount
+  }
+}
+
+fn percentage(number: Float, precision: Int, language: String) -> String {
+  let percentage_value = number *. 100.0
+  let formatted = decimal(percentage_value, precision, language)
+  let percent_symbol = percent_symbol()
+
+  case language {
+    "fr" -> formatted <> " " <> percent_symbol
+    _ -> formatted <> percent_symbol
+  }
+}
+
+fn scientific(number: Float, precision: Int) -> String {
+  let exponent = case number {
+    0.0 -> 0
+    n -> {
+      let abs_n = case n >=. 0.0 {
+        True -> n
+        False -> float.negate(n)
+      }
+      let assert Ok(logarithm) = maths.logarithm_10(abs_n)
+      float.floor(logarithm)
+      |> float.round
+    }
+  }
+
+  let assert Ok(power) = float.power(10.0, int.to_float(exponent))
+  let mantissa = number /. power
+  let assert Ok(power) = float.power(10.0, int.to_float(precision))
+  let rounded_mantissa = int.to_float(float.round(mantissa *. power)) /. power
+
+  float.to_string(rounded_mantissa) <> "e" <> int.to_string(exponent)
+}
+
+fn compact(number: Float, language: String) -> String {
+  case number {
+    n if n >=. 1_000_000_000.0 -> {
+      let billions = n /. 1_000_000_000.0
+      float.to_precision(billions, 1) |> float.to_string
+      <> billion_suffix(language)
+    }
+    n if n >=. 1_000_000.0 -> {
+      let millions = n /. 1_000_000.0
+      float.to_precision(millions, 1) |> float.to_string
+      <> million_suffix(language)
+    }
+    n if n >=. 1000.0 -> {
+      let thousands = n /. 1000.0
+      float.to_precision(thousands, 1) |> float.to_string
+      <> thousand_suffix(language)
+    }
+    _ -> int.to_string(float.round(number))
+  }
+}
+
+// Locale-specific formatting helpers
+fn decimal_separator(language: String) -> String {
+  case language {
+    "pt" | "es" | "fr" | "de" -> ","
+    _ -> "."
+  }
+}
+
+fn thousands_separator(language: String) -> String {
+  case language {
+    "fr" | "es" | "pt" | "it" -> " "
+    // Non-breaking space
+    "de" | "at" | "ch" -> "."
+    "in" -> ","
+    _ -> ","
+    // Default for en, etc.
+  }
+}
+
+fn currency_symbol(currency_code: String) -> String {
+  case currency_code {
+    "USD" -> "$"
+    "EUR" -> "€"
+    "GBP" -> "£"
+    "BRL" -> "R$"
+    "JPY" -> "¥"
+    _ -> currency_code
+  }
+}
+
+fn currency_position(language: String) -> String {
+  case language {
+    "en" -> "before"
+    "pt" | "es" | "fr" -> "before"
+    "de" -> "after"
+    _ -> "before"
+  }
+}
+
+fn percent_symbol() -> String {
+  "%"
+}
+
+fn thousand_suffix(language: String) -> String {
+  case language {
+    "pt" -> "mil"
+    "es" -> "k"
+    "fr" -> "k"
+    _ -> "K"
+  }
+}
+
+fn million_suffix(language: String) -> String {
+  case language {
+    "pt" -> "M"
+    "es" -> "M"
+    "fr" -> "M"
+    _ -> "M"
+  }
+}
+
+fn billion_suffix(language: String) -> String {
+  case language {
+    "pt" -> "B"
+    "es" -> "B"
+    "fr" -> "Md"
+    _ -> "B"
+  }
+}
+
+fn add_thousands_separators(
+  number_str: String,
+  decimal_separator: String,
+  thousands_separator: String,
+) -> String {
+  case string.split(number_str, ".") {
+    [integer_part] -> integer_with_separators(integer_part, thousands_separator)
+    [integer_part, decimal_part] ->
+      integer_with_separators(integer_part, thousands_separator)
+      <> decimal_separator
+      <> decimal_part
+    _ -> number_str
+  }
+}
+
+fn integer_with_separators(integer_str: String, separator: String) -> String {
+  let chars = string.to_graphemes(integer_str) |> list.reverse
+  let grouped = group_by_threes_simple(chars)
+  grouped
+  |> list.map(list.reverse)
+  // Reverse each group to get correct order
+  |> list.map(string.concat)
+  |> list.reverse
+  // Groups are built right-to-left, so reverse to get left-to-right
+  |> string.join(separator)
+}
+
+// Simple approach: group from right to left, return groups in the order they were created
+fn group_by_threes_simple(chars: List(String)) -> List(List(String)) {
+  case chars {
+    [] -> []
+    [a] -> [[a]]
+    [a, b] -> [[a, b]]
+    [a, b, c, ..rest] -> [[a, b, c], ..group_by_threes_simple(rest)]
+  }
+}
+
 // Date formatting implementations
-fn format_date_short(date: calendar.Date, language: String) -> String {
+fn date_short(date: calendar.Date, language: String) -> String {
   let year = date.year % 100 |> pad_zero
   let month = date.month |> month_to_int |> pad_zero
   let day = date.day |> pad_zero
@@ -2041,7 +2329,7 @@ fn format_date_short(date: calendar.Date, language: String) -> String {
   }
 }
 
-fn format_date_medium(date: calendar.Date, language: String) -> String {
+fn date_medium(date: calendar.Date, language: String) -> String {
   let month_name = get_month_name(date.month, language, False)
   case language {
     "en" ->
@@ -2115,7 +2403,7 @@ fn format_date_medium(date: calendar.Date, language: String) -> String {
   }
 }
 
-fn format_date_long(date: calendar.Date, language: String) -> String {
+fn date_long(date: calendar.Date, language: String) -> String {
   let month_name = get_month_name(date.month, language, True)
   case language {
     "en" ->
@@ -2197,7 +2485,7 @@ fn format_date_long(date: calendar.Date, language: String) -> String {
   }
 }
 
-fn format_date_full(date: calendar.Date, language: String) -> String {
+fn date_full(date: calendar.Date, language: String) -> String {
   let day_of_week = get_day_of_week_name(date, language)
   let month_name = get_month_name(date.month, language, True)
   case language {
@@ -2302,7 +2590,7 @@ fn format_date_full(date: calendar.Date, language: String) -> String {
   }
 }
 
-fn format_date_custom(date: calendar.Date, pattern: String) -> String {
+fn date_custom(date: calendar.Date, pattern: String) -> String {
   pattern
   |> string.replace("YYYY", date.year |> int.to_string)
   |> string.replace("MM", pad_zero(date.month |> month_to_int))
@@ -2326,74 +2614,74 @@ fn month_to_int(month: calendar.Month) -> Int {
   }
 }
 
-fn format_time_short(time: calendar.TimeOfDay, language: String) -> String {
+fn time_short(time: calendar.TimeOfDay, language: String) -> String {
   case language {
     "en" -> format_12_hour(time)
     _ -> format_24_hour(time)
   }
 }
 
-fn format_time_medium(time: calendar.TimeOfDay, language: String) -> String {
+fn time_medium(time: calendar.TimeOfDay, language: String) -> String {
   case language {
     "en" -> format_12_hour_with_seconds(time)
     _ -> format_24_hour_with_seconds(time)
   }
 }
 
-fn format_time_long(time: calendar.TimeOfDay, language: String) -> String {
-  format_time_medium(time, language) <> " GMT"
+fn time_long(time: calendar.TimeOfDay, language: String) -> String {
+  time_medium(time, language) <> " GMT"
 }
 
-fn format_time_full(time: calendar.TimeOfDay, language: String) -> String {
-  format_time_long(time, language)
+fn time_full(time: calendar.TimeOfDay, language: String) -> String {
+  time_long(time, language)
 }
 
-fn format_time_custom(time: calendar.TimeOfDay, pattern: String) -> String {
+fn time_custom(time: calendar.TimeOfDay, pattern: String) -> String {
   pattern
   |> string.replace("HH", pad_zero(time.hours))
   |> string.replace("mm", pad_zero(time.minutes))
   |> string.replace("ss", pad_zero(time.seconds))
 }
 
-fn format_datetime_short(
+fn datetime_short(
   date: calendar.Date,
   time: calendar.TimeOfDay,
   language: String,
 ) -> String {
-  let date_part = format_date_short(date, language)
-  let time_part = format_time_short(time, language)
+  let date_part = date_short(date, language)
+  let time_part = time_short(time, language)
   date_part <> " " <> time_part
 }
 
-fn format_datetime_medium(
+fn datetime_medium(
   date: calendar.Date,
   time: calendar.TimeOfDay,
   language: String,
 ) -> String {
-  let date_part = format_date_medium(date, language)
-  let time_part = format_time_medium(time, language)
+  let date_part = date_medium(date, language)
+  let time_part = time_medium(time, language)
   date_part <> " " <> time_part
 }
 
-fn format_datetime_long(
+fn datetime_long(
   date: calendar.Date,
   time: calendar.TimeOfDay,
   language: String,
 ) -> String {
-  let date_part = format_date_long(date, language)
-  let time_part = format_time_long(time, language)
+  let date_part = date_long(date, language)
+  let time_part = time_long(time, language)
   date_part <> " " <> time_part
 }
 
-fn format_datetime_full(
+fn datetime_full(
   date: calendar.Date,
   time: calendar.TimeOfDay,
   language: String,
 ) -> String {
-  format_datetime_long(date, time, language)
+  datetime_long(date, time, language)
 }
 
-fn format_datetime_custom(
+fn datetime_custom(
   date: calendar.Date,
   time: calendar.TimeOfDay,
   pattern: String,
@@ -2726,7 +3014,7 @@ fn format_12_hour(time: calendar.TimeOfDay) -> String {
     h if h >= 12 -> "PM"
     _ -> "AM"
   }
-  string.inspect(hour_12) <> ":" <> pad_zero(time.minutes) <> " " <> ampm
+  int.to_string(hour_12) <> ":" <> pad_zero(time.minutes) <> " " <> ampm
 }
 
 fn format_24_hour(time: calendar.TimeOfDay) -> String {
@@ -2743,7 +3031,7 @@ fn format_12_hour_with_seconds(time: calendar.TimeOfDay) -> String {
     h if h >= 12 -> "PM"
     _ -> "AM"
   }
-  string.inspect(hour_12)
+  int.to_string(hour_12)
   <> ":"
   <> pad_zero(time.minutes)
   <> ":"
@@ -3136,1111 +3424,32 @@ fn calculate_day_of_week(date: calendar.Date) -> Int {
   }
 }
 
-// Translation Validation System
-pub type ValidationError {
-  MissingTranslation(key: String, locale: Locale)
-  MissingParameter(key: String, param: String, locale: Locale)
-  UnusedParameter(key: String, param: String, locale: Locale)
-  InvalidPluralForm(key: String, missing_forms: List(String), locale: Locale)
-  EmptyTranslation(key: String, locale: Locale)
-}
-
-pub type ValidationReport {
-  ValidationReport(
-    errors: List(ValidationError),
-    warnings: List(ValidationError),
-    total_keys: Int,
-    translated_keys: Int,
-    coverage: Float,
-  )
-}
-
-/// Validate target translations against primary translations.
-///
-/// Compares a primary set of translations (e.g., English) with target translations
-/// (e.g., Spanish) to identify missing translations, parameter mismatches, invalid
-/// plural forms, and empty translations. Returns a comprehensive validation report
-/// with error details and translation coverage statistics.
+/// Create a new empty parameter container for string formatting.
 ///
 /// ## Examples
 /// ```gleam
-/// let assert Ok(en) = g18n.locale("en")
-/// let assert Ok(es) = g18n.locale("es")
-/// 
-/// let primary = g18n.translations()
-///   |> g18n.add_translation("welcome", "Welcome {name}!")
-///   |> g18n.add_translation("items.one", "1 item")
-///   |> g18n.add_translation("items.other", "{count} items")
-/// 
-/// let target = g18n.translations()
-///   |> g18n.add_translation("welcome", "¡Bienvenido {nombre}!")  // Parameter mismatch
-///   |> g18n.add_translation("items.one", "1 artículo")
-///   // Missing "items.other" translation
-/// 
-/// let report = g18n.validate_translations(primary, target, es)
-/// // report.errors will contain MissingParameter and MissingTranslation errors
-/// // report.coverage will be 0.67 (2 out of 3 keys translated)
+/// let params = g18n.new()
+///   |> g18n.add_param("name", "Alice")
+///   |> g18n.add_param("count", "5")
 /// ```
-pub fn validate_translations(
-  primary_translations: Translations,
-  target_translations: Translations,
-  target_locale: Locale,
-) -> ValidationReport {
-  let primary_keys = get_all_translation_keys(primary_translations)
-  let target_keys = get_all_translation_keys(target_translations)
-
-  let missing_translations =
-    find_missing_translations(primary_keys, target_keys, target_locale)
-  let parameter_errors =
-    validate_all_parameters(
-      primary_translations,
-      target_translations,
-      target_locale,
-    )
-  let plural_errors = validate_plural_forms(target_translations, target_locale)
-  let empty_errors = find_empty_translations(target_translations, target_locale)
-
-  let all_errors =
-    list.flatten([
-      missing_translations,
-      parameter_errors,
-      plural_errors,
-      empty_errors,
-    ])
-  let total_keys = list.length(primary_keys)
-  let translated_keys = list.length(target_keys)
-  let coverage = case total_keys {
-    0 -> 0.0
-    _ -> int.to_float(translated_keys) /. int.to_float(total_keys)
-  }
-
-  ValidationReport(
-    errors: all_errors,
-    warnings: [],
-    total_keys: total_keys,
-    translated_keys: translated_keys,
-    coverage: coverage,
-  )
+pub fn new_format_params() -> FormatParams {
+  dict.new()
 }
 
-/// Validate that a translation key has the correct parameters.
+/// Add a parameter key-value pair to a format parameters container.
 ///
-/// Checks if a specific translation contains all required parameters and
-/// identifies any unused parameters. This ensures parameter consistency
-/// between different language versions of the same translation.
+/// Used for template substitution in translations.
 ///
 /// ## Examples
 /// ```gleam
-/// let assert Ok(locale) = g18n.locale("es")
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("user.greeting", "Hola {nombre}!")
-///   |> g18n.add_translation("user.stats", "Tienes {points} puntos")
-/// 
-/// // Check if Spanish translation has required English parameters
-/// let errors1 = g18n.validate_translation_parameters(
-///   translations, "user.greeting", ["name"], locale
-/// )
-/// // Returns [MissingParameter("user.greeting", "name", locale)] - "name" missing, "nombre" unused
-/// 
-/// let errors2 = g18n.validate_translation_parameters(
-///   translations, "user.stats", ["points"], locale  
-/// )
-/// // Returns [] - parameters match correctly
+/// let params = g18n.format_params()
+///   |> g18n.add_param("user", "Alice")
+///   |> g18n.add_param("item_count", "3")
 /// ```
-pub fn validate_translation_parameters(
-  translations: Translations,
+pub fn add_param(
+  params: FormatParams,
   key: String,
-  required_params: List(String),
-  locale: Locale,
-) -> List(ValidationError) {
-  let key_parts = string.split(key, ".")
-  case trie.get(translations, key_parts) {
-    Ok(template) -> {
-      let found_params = extract_placeholders(template)
-      let missing =
-        list.filter(required_params, fn(param) {
-          !list.contains(found_params, param)
-        })
-      let unused =
-        list.filter(found_params, fn(param) {
-          !list.contains(required_params, param)
-        })
-
-      let missing_errors =
-        list.map(missing, fn(param) { MissingParameter(key, param, locale) })
-      let unused_warnings =
-        list.map(unused, fn(param) { UnusedParameter(key, param, locale) })
-
-      list.append(missing_errors, unused_warnings)
-    }
-    Error(_) -> [MissingTranslation(key, locale)]
-  }
-}
-
-/// Calculate translation coverage percentage.
-///
-/// Computes the percentage of primary translation keys that have been
-/// translated in the target translations. Returns a float between 0.0 and 1.0
-/// where 1.0 indicates complete coverage (100%).
-///
-/// ## Examples
-/// ```gleam
-/// let primary = g18n.translations()
-///   |> g18n.add_translation("hello", "Hello")
-///   |> g18n.add_translation("goodbye", "Goodbye")
-///   |> g18n.add_translation("welcome", "Welcome")
-/// 
-/// let partial_target = g18n.translations()
-///   |> g18n.add_translation("hello", "Hola")
-///   |> g18n.add_translation("goodbye", "Adiós")
-///   // Missing "welcome" translation
-/// 
-/// let coverage = g18n.get_translation_coverage(primary, partial_target)
-/// // coverage == 0.67 (67% - 2 out of 3 keys translated)
-/// 
-/// let complete_target = partial_target
-///   |> g18n.add_translation("welcome", "Bienvenido")
-/// 
-/// let full_coverage = g18n.get_translation_coverage(primary, complete_target)
-/// // full_coverage == 1.0 (100% coverage)
-/// ```
-pub fn get_translation_coverage(
-  primary_translations: Translations,
-  target_translations: Translations,
-) -> Float {
-  let primary_count = count_translations(primary_translations)
-  let target_count = count_translations(target_translations)
-
-  case primary_count {
-    0 -> 0.0
-    _ -> int.to_float(target_count) /. int.to_float(primary_count)
-  }
-}
-
-/// Find translation keys that are not being used in the application.
-///
-/// Compares all available translation keys against a list of keys actually used
-/// in the application code. Returns keys that exist in translations but are not
-/// referenced, helping identify obsolete translations that can be removed.
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("common.save", "Save")
-///   |> g18n.add_translation("common.cancel", "Cancel")
-///   |> g18n.add_translation("old.feature", "Old Feature")
-///   |> g18n.add_translation("user.profile", "Profile")
-/// 
-/// // Keys actually used in application code
-/// let used_keys = ["common.save", "common.cancel", "user.profile"]
-/// 
-/// let unused = g18n.find_unused_translations(translations, used_keys)
-/// // unused == ["old.feature"] - this key exists but is not used
-/// 
-/// // If all keys are used
-/// let all_used = ["common.save", "common.cancel", "old.feature", "user.profile"]
-/// let no_unused = g18n.find_unused_translations(translations, all_used)
-/// // no_unused == [] - all translation keys are being used
-/// ```
-pub fn find_unused_translations(
-  translations: Translations,
-  used_keys: List(String),
-) -> List(String) {
-  let all_keys = get_all_translation_keys(translations)
-  list.filter(all_keys, fn(key) { !list.contains(used_keys, key) })
-}
-
-/// Export a validation report to a formatted string.
-///
-/// Converts a ValidationReport into a human-readable text format suitable
-/// for display in console output, log files, or CI/CD reports. Includes
-/// coverage statistics, error counts, and detailed error descriptions.
-///
-/// ## Examples
-/// ```gleam
-/// let assert Ok(en) = g18n.locale("en")
-/// let assert Ok(es) = g18n.locale("es")
-/// 
-/// let primary = g18n.translations()
-///   |> g18n.add_translation("hello", "Hello {name}!")
-///   |> g18n.add_translation("goodbye", "Goodbye")
-/// 
-/// let target = g18n.translations()
-///   |> g18n.add_translation("hello", "Hola {nombre}!")  // Parameter mismatch
-///   // Missing "goodbye" translation
-/// 
-/// let report = g18n.validate_translations(primary, target, es)
-/// let formatted = g18n.export_validation_report(report)
-/// 
-/// // formatted contains:
-/// // "Translation Validation Report"
-/// // "================================"
-/// // "Coverage: 50.0%"
-/// // "Total Keys: 2"
-/// // "Translated: 1" 
-/// // "Errors: 2"
-/// // "Warnings: 0"
-/// // 
-/// // "ERRORS:"
-/// // "Missing translation: 'goodbye' for locale es"
-/// // "Missing parameter: 'name' in 'hello' for locale es"
-/// ```
-pub fn export_validation_report(report: ValidationReport) -> String {
-  let error_count = list.length(report.errors)
-  let warning_count = list.length(report.warnings)
-
-  let header =
-    "Translation Validation Report\n"
-    <> "================================\n"
-    <> "Coverage: "
-    <> float.to_string(report.coverage *. 100.0)
-    <> "%\n"
-    <> "Total Keys: "
-    <> int.to_string(report.total_keys)
-    <> "\n"
-    <> "Translated: "
-    <> int.to_string(report.translated_keys)
-    <> "\n"
-    <> "Errors: "
-    <> int.to_string(error_count)
-    <> "\n"
-    <> "Warnings: "
-    <> int.to_string(warning_count)
-    <> "\n\n"
-
-  let error_section = case error_count {
-    0 -> ""
-    _ -> "ERRORS:\n" <> format_validation_errors(report.errors) <> "\n"
-  }
-
-  let warning_section = case warning_count {
-    0 -> ""
-    _ -> "WARNINGS:\n" <> format_validation_errors(report.warnings) <> "\n"
-  }
-
-  header <> error_section <> warning_section
-}
-
-// Validation helper functions
-fn get_all_translation_keys(translations: Translations) -> List(String) {
-  trie.fold(translations, [], fn(acc, key_parts, _value) {
-    let key = string.join(key_parts, ".")
-    [key, ..acc]
-  })
-}
-
-fn find_missing_translations(
-  primary_keys: List(String),
-  target_keys: List(String),
-  locale: Locale,
-) -> List(ValidationError) {
-  list.filter_map(primary_keys, fn(key) {
-    case list.contains(target_keys, key) {
-      True -> Error(Nil)
-      False -> Ok(MissingTranslation(key, locale))
-    }
-  })
-}
-
-fn validate_all_parameters(
-  primary_translations: Translations,
-  target_translations: Translations,
-  target_locale: Locale,
-) -> List(ValidationError) {
-  let target_keys = get_all_translation_keys(target_translations)
-
-  list.flat_map(target_keys, fn(key) {
-    let key_parts = string.split(key, ".")
-    case
-      trie.get(primary_translations, key_parts),
-      trie.get(target_translations, key_parts)
-    {
-      Ok(primary_template), Ok(_) -> {
-        let primary_params = extract_placeholders(primary_template)
-        validate_translation_parameters(
-          target_translations,
-          key,
-          primary_params,
-          target_locale,
-        )
-      }
-      _, _ -> []
-    }
-  })
-}
-
-fn validate_plural_forms(
-  translations: Translations,
-  locale: Locale,
-) -> List(ValidationError) {
-  let all_keys = get_all_translation_keys(translations)
-  let base_keys =
-    list.filter_map(all_keys, fn(key) {
-      case
-        string.contains(key, ".one")
-        || string.contains(key, ".other")
-        || string.contains(key, ".zero")
-      {
-        True -> {
-          let base = case splitter.split(splitter.new([key]), ".one") {
-            #(base, ".one", _) -> Ok(base)
-            _ ->
-              case splitter.split(splitter.new([key]), ".other") {
-                #(base, ".other", _) -> Ok(base)
-                _ ->
-                  case splitter.split(splitter.new([key]), ".zero") {
-                    #(base, ".zero", _) -> Ok(base)
-                    _ -> Error(Nil)
-                  }
-              }
-          }
-          base
-        }
-        False -> Error(Nil)
-      }
-    })
-
-  list.flat_map(base_keys, fn(base_key) {
-    validate_single_plural_form(translations, base_key, locale)
-  })
-}
-
-fn validate_single_plural_form(
-  translations: Translations,
-  base_key: String,
-  locale: Locale,
-) -> List(ValidationError) {
-  let required_forms = case locale.language {
-    "en" -> ["one", "other"]
-    "pt" -> ["zero", "one", "other"]
-    "ru" -> ["one", "few", "many"]
-    _ -> ["one", "other"]
-  }
-
-  let missing_forms =
-    list.filter(required_forms, fn(form) {
-      let key_parts = string.split(base_key <> "." <> form, ".")
-      case trie.get(translations, key_parts) {
-        Ok(_) -> False
-        Error(_) -> True
-      }
-    })
-
-  case missing_forms {
-    [] -> []
-    forms -> [InvalidPluralForm(base_key, forms, locale)]
-  }
-}
-
-fn find_empty_translations(
-  translations: Translations,
-  locale: Locale,
-) -> List(ValidationError) {
-  trie.fold(translations, [], fn(acc, key_parts, value) {
-    let key = string.join(key_parts, ".")
-    case string.trim(value) {
-      "" -> [EmptyTranslation(key, locale), ..acc]
-      _ -> acc
-    }
-  })
-}
-
-fn count_translations(translations: Translations) -> Int {
-  trie.fold(translations, 0, fn(count, _key, _value) { count + 1 })
-}
-
-fn format_validation_errors(errors: List(ValidationError)) -> String {
-  errors
-  |> list.map(fn(error) {
-    case error {
-      MissingTranslation(key, locale) ->
-        "  - Missing translation for '"
-        <> key
-        <> "' in "
-        <> locale_to_string(locale)
-      MissingParameter(key, param, locale) ->
-        "  - Missing parameter '{"
-        <> param
-        <> "}' in '"
-        <> key
-        <> "' ("
-        <> locale_to_string(locale)
-        <> ")"
-      UnusedParameter(key, param, locale) ->
-        "  - Unused parameter '{"
-        <> param
-        <> "}' in '"
-        <> key
-        <> "' ("
-        <> locale_to_string(locale)
-        <> ")"
-      InvalidPluralForm(key, forms, locale) ->
-        "  - Missing plural forms "
-        <> string.inspect(forms)
-        <> " for '"
-        <> key
-        <> "' in "
-        <> locale_to_string(locale)
-      EmptyTranslation(key, locale) ->
-        "  - Empty translation for '"
-        <> key
-        <> "' in "
-        <> locale_to_string(locale)
-    }
-  })
-  |> string.join("\n")
-}
-
-// JSON Loading Functions
-
-/// Parse a JSON string into a Translations structure.
-/// 
-/// Converts a JSON object with dotted keys into an internal trie structure
-/// for efficient translation lookups. The JSON should contain key-value pairs
-/// where keys use dot notation (e.g., "user.name", "welcome.message") and
-/// values are the translation strings.
-/// 
-/// ## Examples
-/// ```gleam
-/// let json = "{\"user.name\": \"Name\", \"user.email\": \"Email\"}"
-/// let assert Ok(translations) = g18n.translations_from_json(json)
-/// ```
-pub fn translations_from_json(
-  json_string: String,
-) -> Result(Translations, String) {
-  case json.parse(json_string, decode.dict(decode.string, decode.string)) {
-    Ok(dict_result) -> {
-      // Convert dict to trie
-      let trie_result =
-        dict.fold(dict_result, trie.new(), fn(trie, key, value) {
-          let key_parts = string.split(key, ".")
-          trie.insert(trie, key_parts, value)
-        })
-      Ok(trie_result)
-    }
-    Error(json_err) ->
-      Error("Failed to parse JSON: " <> string.inspect(json_err))
-  }
-}
-
-/// Convert a Translations structure to a JSON string.
-/// 
-/// Converts the internal trie structure back to a JSON object with dotted keys.
-/// This is useful for exporting translations or debugging the current state
-/// of loaded translations.
-/// 
-/// ## Examples
-/// ```gleam
-/// let assert Ok(translations) = g18n.translations_from_json("{\"user.name\": \"Name\"}")
-/// let json_output = g18n.translations_to_json(translations)
-/// // Returns: {"user.name": "Name"}
-/// ```
-pub fn translations_to_json(translations: Translations) -> String {
-  // Convert trie to dict for JSON serialization
-  let dict_translations =
-    trie.fold(translations, dict.new(), fn(dict_acc, key_parts, value) {
-      let key = string.join(key_parts, ".")
-      dict.insert(dict_acc, key, value)
-    })
-
-  dict_translations
-  |> dict.to_list
-  |> list_map(fn(pair) { #(pair.0, json.string(pair.1)) })
-  |> json.object
-  |> json.to_string
-}
-
-/// Import translations from nested JSON format.
-///
-/// Converts nested JSON objects to the internal flat trie structure.
-/// This is the industry-standard format used by most i18n libraries like
-/// react-i18next, Vue i18n, and Angular i18n.
-///
-/// ## Parameters
-/// - `json_string`: JSON string with nested structure
-///
-/// ## Returns
-/// `Result(Translations, String)` - Success with translations or error message
-///
-/// ## Examples
-/// ```gleam
-/// let nested_json = "
-/// {
-///   \"ui\": {
-///     \"button\": {
-///       \"save\": \"Save\",
-///       \"cancel\": \"Cancel\"
-///     }
-///   },
-///   \"user\": {
-///     \"name\": \"Name\",
-///     \"email\": \"Email\"
-///   }
-/// }"
-/// 
-/// let assert Ok(translations) = g18n.translations_from_nested_json(nested_json)
-/// // Converts to flat keys: "ui.button.save", "ui.button.cancel", etc.
-/// ```
-pub fn translations_from_nested_json(
-  json_string: String,
-) -> Result(Translations, String) {
-  case json.parse(json_string, decode.dict(decode.string, decode.dynamic)) {
-    Ok(dict_result) -> {
-      let flattened_dict = flatten_json_object(dict_result, "")
-      let trie_result =
-        dict.fold(flattened_dict, trie.new(), fn(trie, key, value) {
-          let key_parts = string.split(key, ".")
-          trie.insert(trie, key_parts, value)
-        })
-      Ok(trie_result)
-    }
-    Error(err) -> Error("Failed to parse nested JSON: " <> string.inspect(err))
-  }
-}
-
-/// Export translations to nested JSON format.
-///
-/// Converts the internal flat trie structure to nested JSON objects.
-/// This produces the industry-standard format expected by most i18n tools.
-///
-/// ## Parameters
-/// - `translations`: The translations to export
-///
-/// ## Returns
-/// `String` - Nested JSON representation of the translations
-///
-/// ## Examples
-/// ```gleam
-/// let translations = g18n.translations()
-///   |> g18n.add_translation("ui.button.save", "Save")
-///   |> g18n.add_translation("ui.button.cancel", "Cancel")
-///   |> g18n.add_translation("user.name", "Name")
-/// 
-/// let nested_json = g18n.translations_to_nested_json(translations)
-/// // Returns: {"ui":{"button":{"save":"Save","cancel":"Cancel"}},"user":{"name":"Name"}}
-/// ```
-pub fn translations_to_nested_json(translations: Translations) -> String {
-  // Convert trie directly to nested JSON structure
-  trie_to_nested_json(translations)
-  |> json.to_string
-}
-
-/// Convert nested JSON structure to flat key-value pairs.
-///
-/// Takes a nested dictionary structure and flattens it using dot notation.
-/// Useful for converting industry-standard nested JSON to g18n's internal format.
-///
-/// ## Examples  
-/// ```gleam
-/// let nested = dict.new()
-///   |> dict.insert("ui", json.object([
-///     #("button", json.object([#("save", json.string("Save"))]))
-///   ]))
-/// 
-/// let flat = g18n.nested_to_flatten_dict(nested, "")
-/// // Returns: {"ui.button.save": "Save"}
-/// ```
-pub fn nested_to_flatten_dict(
-  nested_dict: Dict(String, json.Json),
-  prefix: String,
-) -> Dict(String, String) {
-  dict.fold(nested_dict, dict.new(), fn(acc, key, value) {
-    let current_key = case prefix {
-      "" -> key
-      _ -> prefix <> "." <> key
-    }
-
-    case value {
-      // If it's a nested object, recurse
-      _ -> {
-        // Try to extract string value
-        case extract_string_from_json(value) {
-          Some(str_value) -> dict.insert(acc, current_key, str_value)
-          None -> acc
-          // Skip non-string values for now
-        }
-      }
-    }
-  })
-}
-
-// Helper function to recursively flatten nested dictionary
-fn flatten_json_object(
-  dict_obj: Dict(String, Dynamic),
-  prefix: String,
-) -> Dict(String, String) {
-  dict.fold(dict_obj, dict.new(), fn(acc, key, value) {
-    let current_key = case prefix {
-      "" -> key
-      _ -> prefix <> "." <> key
-    }
-
-    case decode.run(value, decode.dict(decode.string, decode.dynamic)) {
-      Ok(nested_dict) -> {
-        let nested_flattened = flatten_json_object(nested_dict, current_key)
-        dict.fold(nested_flattened, acc, dict.insert)
-      }
-      Error(_) -> {
-        // Try to decode as string
-        case decode.run(value, decode.string) {
-          Ok(str_value) -> dict.insert(acc, current_key, str_value)
-          Error(_) -> acc
-          // Skip non-string values
-        }
-      }
-    }
-  })
-}
-
-// Convert trie directly to nested JSON structure
-fn trie_to_nested_json(translations: Translations) -> json.Json {
-  // Collect all key-value pairs from trie
-  let all_pairs =
-    trie.fold(translations, [], fn(acc, key_parts, value) {
-      [#(key_parts, value), ..acc]
-    })
-
-  // Build nested structure from key parts
-  build_nested_structure(all_pairs)
-}
-
-// Build nested JSON structure from list of (key_parts, value) pairs
-fn build_nested_structure(pairs: List(#(List(String), String))) -> json.Json {
-  pairs
-  |> list.fold(dict.new(), fn(acc, pair) {
-    let #(key_parts, value) = pair
-    insert_at_path(acc, key_parts, json.string(value))
-  })
-  |> dict.to_list
-  |> json.object
-}
-
-// Insert value at nested path in dict
-fn insert_at_path(
-  dict_acc: Dict(String, json.Json),
-  key_parts: List(String),
-  value: json.Json,
-) -> Dict(String, json.Json) {
-  case key_parts {
-    [] -> dict_acc
-    [single_key] -> dict.insert(dict_acc, single_key, value)
-    [first_key, ..remaining_keys] -> {
-      let existing = case dict.get(dict_acc, first_key) {
-        Ok(json_obj) -> extract_dict_from_json(json_obj)
-        Error(_) -> dict.new()
-      }
-      let updated = insert_at_path(existing, remaining_keys, value)
-      dict.insert(dict_acc, first_key, dict.to_list(updated) |> json.object)
-    }
-  }
-}
-
-// Extract dict from JSON object, return empty dict if not object
-fn extract_dict_from_json(json_val: json.Json) -> Dict(String, json.Json) {
-  case json_val {
-    _ -> dict.new()
-    // For now, return empty dict - will improve later
-  }
-}
-
-// Extract string value from JSON, return None if not a string
-fn extract_string_from_json(_json_val: json.Json) -> Option(String) {
-  // For now, return None - will implement proper extraction later
-  None
-}
-
-// Helper Functions
-fn list_map(list: List(a), func: fn(a) -> b) -> List(b) {
-  case list {
-    [] -> []
-    [head, ..tail] -> [func(head), ..list_map(tail, func)]
-  }
-}
-
-fn list_filter(list: List(a), predicate: fn(a) -> Bool) -> List(a) {
-  case list {
-    [] -> []
-    [head, ..tail] -> {
-      case predicate(head) {
-        True -> [head, ..list_filter(tail, predicate)]
-        False -> list_filter(tail, predicate)
-      }
-    }
-  }
-}
-
-/// Main entry point for the g18n CLI tool.
-/// 
-/// Handles command-line arguments and dispatches to appropriate command handlers.
-/// Currently supports 'generate' command to create Gleam translation modules
-/// and 'help' command to display usage information.
-/// 
-/// ## Supported Commands
-/// - `generate`: Generate Gleam modules from translation JSON files
-/// - `help`: Display help information
-/// - No arguments: Display help information
-/// 
-/// ## Examples
-/// Run via command line:
-/// ```bash
-/// gleam run generate  # Generate translation modules
-/// gleam run help      # Show help
-/// gleam run           # Show help (default)
-/// ```
-/// Main entry point for the g18n CLI tool.
-/// 
-/// Handles command-line arguments and dispatches to appropriate command handlers.
-/// Supports 'generate' for flat JSON, 'generate_nested' for nested JSON,
-/// and 'help' for usage information.
-/// 
-/// ## Supported Commands
-/// - `generate`: Generate Gleam modules from flat JSON files
-/// - `generate_nested`: Generate Gleam modules from nested JSON files
-/// - `help`: Display help information
-/// - No arguments: Display help information
-/// 
-/// ## Examples
-/// Run via command line:
-/// ```bash
-/// gleam run generate        # Generate from flat JSON files
-/// gleam run generate_nested # Generate from nested JSON files  
-/// gleam run help           # Show help
-/// gleam run                # Show help (default)
-/// ```
-pub fn main() {
-  case argv.load().arguments {
-    ["generate"] -> generate_command()
-    ["generate_nested"] -> generate_nested_command()
-    ["help"] -> help_command()
-    [] -> help_command()
-    _ -> {
-      io.println("Unknown command. Use 'help' for available commands.")
-    }
-  }
-}
-
-fn generate_command() {
-  case generate_translations() {
-    Ok(path) -> {
-      io.println("🌏Generated translation modules from flat JSON")
-      io.println("  " <> path)
-    }
-    Error(msg) -> io.println("Error: " <> msg)
-  }
-}
-
-fn generate_nested_command() {
-  case generate_nested_translations() {
-    Ok(path) -> {
-      io.println("🌏Generated translation modules from nested JSON")
-      io.println("  " <> path)
-    }
-    Error(msg) -> io.println("Error: " <> msg)
-  }
-}
-
-fn help_command() {
-  io.println("g18n CLI - Internationalization for Gleam")
-  io.println("")
-  io.println("Commands:")
-  io.println("  generate         Generate Gleam module from flat JSON files")
-  io.println(
-    "  generate_nested  Generate Gleam module from nested JSON files (industry standard)",
-  )
-  io.println("  help             Show this help message")
-  io.println("")
-  io.println("Flat JSON usage:")
-  io.println("  Place flat JSON files in src/<project>/translations/")
-  io.println(
-    "  Example: {\"ui.button.save\": \"Save\", \"user.name\": \"Name\"}",
-  )
-  io.println("  Run 'gleam run generate' to create the translations module")
-  io.println("")
-  io.println("Nested JSON usage:")
-  io.println("  Place nested JSON files in src/<project>/translations/")
-  io.println(
-    "  Example: {\"ui\": {\"button\": {\"save\": \"Save\"}}, \"user\": {\"name\": \"Name\"}}",
-  )
-  io.println(
-    "  Run 'gleam run generate_nested' to create the translations module",
-  )
-  io.println("")
-  io.println("Supported formats:")
-  io.println("  ✅ Flat JSON (g18n optimized)")
-  io.println(
-    "  ✅ Nested JSON (react-i18next, Vue i18n, Angular i18n compatible)",
-  )
-  io.println("")
-}
-
-fn generate_translations() -> Result(String, String) {
-  use project_name <- result.try(get_project_name())
-  use locale_files <- result.try(find_locale_files(project_name))
-  use output_path <- result.try(write_multi_locale_module(
-    project_name,
-    locale_files,
-  ))
-  Ok(output_path)
-}
-
-fn generate_nested_translations() -> Result(String, String) {
-  use project_name <- result.try(get_project_name())
-  use locale_files <- result.try(find_locale_files(project_name))
-  use output_path <- result.try(write_multi_locale_module_from_nested(
-    project_name,
-    locale_files,
-  ))
-  Ok(output_path)
-}
-
-fn get_project_name() -> Result(String, String) {
-  let root = find_root(".")
-  let toml_path = filepath.join(root, "gleam.toml")
-
-  use content <- result.try(
-    simplifile.read(toml_path)
-    |> result.map_error(fn(_) { "Could not read gleam.toml" }),
-  )
-
-  use toml <- result.try(
-    tom.parse(content)
-    |> result.map_error(fn(_) { "Could not parse gleam.toml" }),
-  )
-
-  use name <- result.try(
-    tom.get_string(toml, ["name"])
-    |> result.map_error(fn(_) { "Could not find project name in gleam.toml" }),
-  )
-
-  Ok(name)
-}
-
-fn escape_string(str: String) -> String {
-  str
-  |> string.replace("\\", "\\\\")
-  |> string.replace("\"", "\\\"")
-  |> string.replace("\n", "\\n")
-  |> string.replace("\r", "\\r")
-  |> string.replace("\t", "\\t")
-}
-
-fn find_root(path: String) -> String {
-  let toml = filepath.join(path, "gleam.toml")
-
-  case simplifile.is_file(toml) {
-    Ok(False) | Error(_) -> find_root(filepath.join(path, ".."))
-    Ok(True) -> path
-  }
-}
-
-fn find_locale_files(
-  project_name: String,
-) -> Result(List(#(String, String)), String) {
-  let root = find_root(".")
-  let translations_dir =
-    filepath.join(root, "src")
-    |> filepath.join(project_name)
-    |> filepath.join("translations")
-
-  case simplifile.read_directory(translations_dir) {
-    Ok(files) -> {
-      let locale_files =
-        files
-        |> list_filter(fn(file) {
-          string.ends_with(file, ".json") && file != "translations.json"
-        })
-        |> list_map(fn(file) {
-          let locale_code = string.drop_end(file, 5)
-          // Remove .json extension
-          let file_path = filepath.join(translations_dir, file)
-          #(locale_code, file_path)
-        })
-
-      case locale_files {
-        [] ->
-          Error(
-            "No locale JSON files found in "
-            <> translations_dir
-            <> "\nLooking for files like en.json, es.json, pt.json, etc.",
-          )
-        files -> Ok(files)
-      }
-    }
-    Error(_) ->
-      Error("Could not read translations directory: " <> translations_dir)
-  }
-}
-
-fn write_multi_locale_module(
-  project_name: String,
-  locale_files: List(#(String, String)),
-) -> Result(String, String) {
-  use locale_data <- result.try(load_all_locales(locale_files))
-  let root = find_root(".")
-  let output_path =
-    filepath.join(root, "src")
-    |> filepath.join(project_name)
-    |> filepath.join("translations.gleam")
-
-  let module_content = generate_multi_locale_module_content(locale_data)
-
-  simplifile.write(output_path, module_content)
-  |> result.map_error(fn(_) {
-    "Could not write translations module at: " <> output_path
-  })
-  |> result.map(fn(_) { output_path })
-}
-
-fn write_multi_locale_module_from_nested(
-  project_name: String,
-  locale_files: List(#(String, String)),
-) -> Result(String, String) {
-  use locale_data <- result.try(load_all_locales_from_nested(locale_files))
-  let root = find_root(".")
-  let output_path =
-    filepath.join(root, "src")
-    |> filepath.join(project_name)
-    |> filepath.join("translations.gleam")
-
-  let module_content = generate_multi_locale_module_content(locale_data)
-
-  simplifile.write(output_path, module_content)
-  |> result.map_error(fn(_) {
-    "Could not write translations module from nested JSON at: " <> output_path
-  })
-  |> result.map(fn(_) { output_path })
-}
-
-fn load_all_locales(
-  locale_files: List(#(String, String)),
-) -> Result(List(#(String, Translations)), String) {
-  list_fold_result(locale_files, [], fn(acc, locale_file) {
-    let #(locale_code, file_path) = locale_file
-    use content <- result.try(
-      simplifile.read(file_path)
-      |> result.map_error(fn(_) { "Could not read " <> file_path }),
-    )
-    use translations <- result.try(translations_from_json(content))
-    Ok([#(locale_code, translations), ..acc])
-  })
-  |> result.map(list.reverse)
-}
-
-fn load_all_locales_from_nested(
-  locale_files: List(#(String, String)),
-) -> Result(List(#(String, Translations)), String) {
-  list_fold_result(locale_files, [], fn(acc, locale_file) {
-    let #(locale_code, file_path) = locale_file
-    use content <- result.try(
-      simplifile.read(file_path)
-      |> result.map_error(fn(_) { "Could not read " <> file_path }),
-    )
-    use translations <- result.try(translations_from_nested_json(content))
-    Ok([#(locale_code, translations), ..acc])
-  })
-  |> result.map(list.reverse)
-}
-
-fn generate_multi_locale_module_content(
-  locale_data: List(#(String, Translations)),
-) -> String {
-  let imports = "import g18n\n\n"
-
-  let locale_functions =
-    locale_data
-    |> list_map(fn(locale_pair) {
-      let #(locale_code, translations) = locale_pair
-      generate_single_locale_functions(locale_code, translations)
-    })
-    |> string.join("\n\n")
-
-  let all_locales_function = generate_all_locales_function(locale_data)
-
-  imports <> locale_functions <> "\n\n" <> all_locales_function
-}
-
-fn generate_single_locale_functions(
-  locale_code: String,
-  translations: Translations,
-) -> String {
-  // Convert trie to dict for generation
-  let dict_translations =
-    trie.fold(translations, dict.new(), fn(dict_acc, key_parts, value) {
-      let key = string.join(key_parts, ".")
-      dict.insert(dict_acc, key, value)
-    })
-
-  let translations_list =
-    dict_translations
-    |> dict.to_list
-    |> list.map(fn(pair) {
-      "  |> g18n.add_translation(\""
-      <> pair.0
-      <> "\", \""
-      <> escape_string(pair.1)
-      <> "\")"
-    })
-    |> string.join("\n")
-
-  let translations_func =
-    "pub fn "
-    <> locale_code
-    <> "_translations() -> g18n.Translations {\n  g18n.translations()\n"
-    <> translations_list
-    <> "\n}"
-
-  let locale_func =
-    "pub fn "
-    <> locale_code
-    <> "_locale() -> Result(g18n.Locale, g18n.LocaleError) {\n  g18n.locale(\""
-    <> locale_code
-    <> "\")\n}"
-
-  let translator_func =
-    "pub fn "
-    <> locale_code
-    <> "_translator() -> Result(g18n.Translator, g18n.LocaleError) {\n  case "
-    <> locale_code
-    <> "_locale() {\n    Ok(loc) -> Ok(g18n.translator(loc, "
-    <> locale_code
-    <> "_translations()))\n    Error(err) -> Error(err)\n  }\n}"
-
-  translations_func <> "\n\n" <> locale_func <> "\n\n" <> translator_func
-}
-
-fn generate_all_locales_function(
-  locale_data: List(#(String, Translations)),
-) -> String {
-  let locale_list =
-    locale_data
-    |> list_map(fn(pair) { "\"" <> pair.0 <> "\"" })
-    |> string.join(", ")
-
-  "pub fn available_locales() -> List(String) {\n  [" <> locale_list <> "]\n}"
-}
-
-fn list_fold_result(
-  list: List(a),
-  initial: b,
-  func: fn(b, a) -> Result(b, String),
-) -> Result(b, String) {
-  case list {
-    [] -> Ok(initial)
-    [head, ..tail] -> {
-      case func(initial, head) {
-        Ok(new_acc) -> list_fold_result(tail, new_acc, func)
-        Error(err) -> Error(err)
-      }
-    }
-  }
-}
-
-fn locale_to_string(locale: Locale) -> String {
-  case locale {
-    Locale(language, country) ->
-      case country {
-        Some(c) -> language <> "-" <> c
-        None -> language
-      }
-  }
+  value: String,
+) -> FormatParams {
+  dict.insert(params, key, value)
 }
