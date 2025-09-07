@@ -1214,6 +1214,7 @@ pub fn nested_json_import_test() {
 
   let exported = g18n.translations_to_nested_json(translations)
   // Should contain the translations in nested JSON format
-  let expected = "{\"ui\":{\"button\":{\"save\":\"Save\"}},\"user\":{\"name\":\"Name\"}}"
+  let expected =
+    "{\"ui\":{\"button\":{\"save\":\"Save\"}},\"user\":{\"name\":\"Name\"}}"
   assert exported == expected
 }

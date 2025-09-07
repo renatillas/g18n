@@ -3943,31 +3943,33 @@ fn help_command() {
   io.println("g18n CLI - Internationalization for Gleam")
   io.println("")
   io.println("Commands:")
-  io.println(
-    "  generate         Generate Gleam module from flat JSON files",
-  )
+  io.println("  generate         Generate Gleam module from flat JSON files")
   io.println(
     "  generate_nested  Generate Gleam module from nested JSON files (industry standard)",
   )
   io.println("  help             Show this help message")
   io.println("")
   io.println("Flat JSON usage:")
+  io.println("  Place flat JSON files in src/<project>/translations/")
   io.println(
-    "  Place flat JSON files in src/<project>/translations/",
+    "  Example: {\"ui.button.save\": \"Save\", \"user.name\": \"Name\"}",
   )
-  io.println("  Example: {\"ui.button.save\": \"Save\", \"user.name\": \"Name\"}")
   io.println("  Run 'gleam run generate' to create the translations module")
   io.println("")
   io.println("Nested JSON usage:")
+  io.println("  Place nested JSON files in src/<project>/translations/")
   io.println(
-    "  Place nested JSON files in src/<project>/translations/",
+    "  Example: {\"ui\": {\"button\": {\"save\": \"Save\"}}, \"user\": {\"name\": \"Name\"}}",
   )
-  io.println("  Example: {\"ui\": {\"button\": {\"save\": \"Save\"}}, \"user\": {\"name\": \"Name\"}}")
-  io.println("  Run 'gleam run generate_nested' to create the translations module")
+  io.println(
+    "  Run 'gleam run generate_nested' to create the translations module",
+  )
   io.println("")
   io.println("Supported formats:")
   io.println("  ✅ Flat JSON (g18n optimized)")
-  io.println("  ✅ Nested JSON (react-i18next, Vue i18n, Angular i18n compatible)")
+  io.println(
+    "  ✅ Nested JSON (react-i18next, Vue i18n, Angular i18n compatible)",
+  )
   io.println("")
 }
 
