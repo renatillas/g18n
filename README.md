@@ -27,79 +27,75 @@ gleam add g18n
 
 ## Module Architecture
 
-g18n is organized into focused modules for better maintainability and clearer APIs:
+g18n is organized into two focused modules for simplicity and clarity:
 
 ### Core Modules
 
-- **`g18n`** - Translation management, validation, JSON handling, and code generation
-- **`g18n/locale`** - Locale creation, text direction, locale negotiation, and plural rules  
-- **`g18n/translator`** - Core translation functionality with pluralization and context support
-- **`g18n/format`** - Number, date/time formatting, and parameter substitution
+- **`g18n`** - Translation management, formatting, validation, and code generation
+- **`g18n/locale`** - Locale creation, text direction, negotiation, and plural rules
 
 ### Usage Pattern
 
 ```gleam
-import g18n                    // Translation storage & validation
-import g18n/locale             // Locale handling 
-import g18n/translator         // Translation functions
-import g18n/format            // Formatting utilities
+import g18n        // Core translation functions
+import g18n/locale // Locale utilities
 ```
 
-Each module has a focused responsibility, making the library easier to understand and use.
+Clean, simple module structure that's easy to understand and use.
 
 ## Quick Start
 
 ```gleam
 import g18n
 import g18n/locale
-import g18n/translator
-import g18n/format
 import gleam/dict
+import gleam/time/calendar
 
 pub fn main() {
   // Create a locale and translator
   let assert Ok(en_locale) = locale.new("en-US")
-  let translations = g18n.new()
+  let translations = g18n.new_translations()
     |> g18n.add_translation("welcome", "Welcome {name}!")
     |> g18n.add_translation("item.one", "1 item")
     |> g18n.add_translation("item.other", "{count} items")
-  let en_translator = translator.new(en_locale, translations)
+  let en_translator = g18n.new_translator(en_locale, translations)
   
   // Basic translation with parameters
-  let params = dict.new() |> dict.insert("name", "Alice")
-  let greeting = format.format_string(translator.t(en_translator, "welcome"), params)
+  let params = g18n.new_format_params() |> g18n.add_param("name", "Alice")
+  let greeting = g18n.translate_with_params(en_translator, "welcome", params)
   // "Welcome Alice!"
   
   // Pluralization
-  translator.t_plural(en_translator, "item", 5) // "5 items"
+  g18n.translate_plural(en_translator, "item", 5) // "5 items"
   
   // Date formatting (12 languages supported)
-  let date = #(2024, 1, 15)
-  format.format_date(date, en_locale, format.FullFormat) 
+  let date = calendar.Date(2024, calendar.January, 15)
+  g18n.format_date(en_translator, date, g18n.Full) 
   // "Monday, January 15, 2024 GMT"
   
   // Relative time (12 languages)
-  format.relative_time(format.Hours(2), en_locale, format.Past)
+  g18n.format_relative_time(en_translator, g18n.Hours(2), g18n.Past)
   // "2 hours ago"
   
   // Number formatting
-  format.format_number(1234.56, en_locale, format.Currency("USD", 2)) // "$1,234.56"
+  g18n.format_number(en_translator, 1234.56, g18n.Currency("USD", 2)) // "$1,234.56"
   
   // RTL/LTR Support
   let assert Ok(arabic) = locale.new("ar")
-  locale.text_direction(arabic) // locale.RTL
-  locale.css_direction(arabic)  // "rtl"
+  locale.get_css_direction(arabic)  // "rtl"
 
   // Context-sensitive translations  
-  let context_translations = g18n.new()
+  let context_translations = g18n.new_translations()
     |> g18n.add_context_translation("bank", "financial", "financial institution")
     |> g18n.add_context_translation("bank", "river", "riverbank")
-  translator.t_context(en_translator, "bank", "financial") // "financial institution"
+  let context_translator = g18n.new_translator(en_locale, context_translations)
+  g18n.translate_with_context(context_translator, "bank", g18n.Context("financial")) 
+  // "financial institution"
 
   // Locale negotiation
-  let available = ["en", "es", "fr"]
+  let available_locales = [en_locale]
   let preferred = locale.parse_accept_language("es-MX,es;q=0.9,en;q=0.8")
-  locale.negotiate_locale(available, preferred) // Some("es")
+  locale.negotiate_locale(available_locales, preferred) // Ok(en_locale)
 }
 ```
 
@@ -108,21 +104,19 @@ pub fn main() {
 ```gleam
 import g18n
 import g18n/locale
-import g18n/translator
-import g18n/format
-import gleam/dict
+import gleam/time/calendar
 
 // Basic setup
 let assert Ok(en_locale) = locale.new("en-US")
-let translations = g18n.new()
+let translations = g18n.new_translations()
   |> g18n.add_translation("welcome", "Welcome {name}!")
   |> g18n.add_translation("item.one", "1 item")  
   |> g18n.add_translation("item.other", "{count} items")
-let en_translator = translator.new(en_locale, translations)
+let en_translator = g18n.new_translator(en_locale, translations)
 
 // Translation with parameters
-let params = dict.new() |> dict.insert("name", "Alice")
-format.format_string(translator.t(en_translator, "welcome"), params) // "Welcome Alice!"
+let params = g18n.new_format_params() |> g18n.add_param("name", "Alice")
+g18n.translate_with_params(en_translator, "welcome", params) // "Welcome Alice!"
 
 // Import from nested JSON (industry standard)
 let nested_json = "{\"ui\":{\"button\":{\"save\":\"Save\"}}}"
@@ -133,17 +127,17 @@ let flat_json = "{\"ui.button.save\":\"Save\"}"
 let assert Ok(flat_translations) = g18n.translations_from_json(flat_json)
 
 // Pluralization
-translator.t_plural(en_translator, "item", 5) // "5 items"
+g18n.translate_plural(en_translator, "item", 5) // "5 items"
 
 // Date formatting (12 languages supported)
-let date = #(2024, 1, 15) 
-format.format_date(date, en_locale, format.FullFormat) // "Monday, January 15, 2024 GMT"
+let date = calendar.Date(2024, calendar.January, 15)
+g18n.format_date(en_translator, date, g18n.Full) // "Monday, January 15, 2024 GMT"
 
 // Relative time (12 languages)
-format.relative_time(format.Hours(2), en_locale, format.Past) // "2 hours ago"
+g18n.format_relative_time(en_translator, g18n.Hours(2), g18n.Past) // "2 hours ago"
 
 // Number & currency formatting
-format.format_number(1234.56, en_locale, format.Currency("USD", 2)) // "$1,234.56"
+g18n.format_number(en_translator, 1234.56, g18n.Currency("USD", 2)) // "$1,234.56"
 ```
 
 ## CLI Code Generation
@@ -226,29 +220,32 @@ Use generated translations:
 
 ```gleam
 import my_project/translations
-import g18n/translator
+import g18n
 
 let assert Ok(en_translator) = translations.en_translator()
 let assert Ok(es_translator) = translations.es_translator()
 
-translator.t(en_translator, "welcome")  // "Welcome {name}!"
-translator.t(es_translator, "welcome")  // "¡Bienvenido {name}!"
+g18n.translate(en_translator, "welcome")  // "Welcome {name}!"
+g18n.translate(es_translator, "welcome")  // "¡Bienvenido {name}!"
 ```
 
 ## Language Examples
 
 ```gleam
-import g18n/format
+import g18n
+import g18n/locale
+import gleam/time/calendar
 
-let date = #(2024, 1, 15)
+let date = calendar.Date(2024, calendar.January, 15)
 
+// Date formatting examples across languages:
 // English: "Monday, January 15, 2024 GMT"
 // Spanish: "lunes, 15 de enero de 2024 GMT" 
 // Chinese: "2024年一月15日星期一 GMT"
 // Russian: "понедельник, 15 январь 2024 г. GMT"
 // Arabic: "الإثنين، 15 يناير 2024 GMT"
 
-format.relative_time(format.Hours(2), locale, format.Past)
+g18n.format_relative_time(translator, g18n.Hours(2), g18n.Past)
 // English: "2 hours ago"
 // Spanish: "hace 2 horas"  
 // Chinese: "2小时前"
