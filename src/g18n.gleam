@@ -1,7 +1,5 @@
 import argv
 import filepath
-import g18n/internal/format
-import g18n/internal/helpers
 import g18n/locale
 import gleam/bool
 import gleam/dict.{type Dict}
@@ -315,7 +313,7 @@ pub fn get_keys_with_prefix(
   let prefix_parts = string.split(prefix, ".")
   trie.fold(translations.translations, [], fn(acc, key_parts, _value) {
     let full_key = string.join(key_parts, ".")
-    case helpers.has_prefix(key_parts, prefix_parts) {
+    case has_prefix(key_parts, prefix_parts) {
       True -> [full_key, ..acc]
       False -> acc
     }
@@ -1581,7 +1579,7 @@ pub fn translate_with_params(
   params params: FormatParams,
 ) -> String {
   let template = translate(translator, key)
-  format.format_string(template, params)
+  format_string(template, params)
 }
 
 /// Translate a key with context for disambiguation.
@@ -1648,7 +1646,7 @@ pub fn translate_with_context_and_params(
   params: FormatParams,
 ) -> String {
   let template = translate_with_context(translator, key, context)
-  format.format_string(template, params)
+  format_string(template, params)
 }
 
 /// Translate with automatic pluralization based on count and locale rules.
@@ -1695,7 +1693,7 @@ pub fn translate_plural(
 
   // Automatically substitute the {count} parameter
   let params = dict.new() |> dict.insert("count", int.to_string(count))
-  format.format_string(template, params)
+  format_string(template, params)
 }
 
 /// Translate with pluralization and parameter substitution.
@@ -1726,7 +1724,7 @@ pub fn translate_plural_with_params(
 
   // Add count parameter and merge with provided params
   let all_params = params |> dict.insert("count", int.to_string(count))
-  format.format_string(template, all_params)
+  format_string(template, all_params)
 }
 
 /// Get the locale from a translator.
@@ -1820,7 +1818,7 @@ pub fn namespace(
   let prefix_parts = string.split(namespace, ".")
   trie.fold(translator.translations.translations, [], fn(acc, key_parts, value) {
     let full_key = string.join(key_parts, ".")
-    case helpers.has_prefix(key_parts, prefix_parts) {
+    case has_prefix(key_parts, prefix_parts) {
       True -> [#(full_key, value), ..acc]
       False -> acc
     }
@@ -1928,7 +1926,7 @@ pub fn translate_ordinal_with_params(
       "ordinal",
       locale.ordinal_suffix(translator.locale, position),
     )
-  format.format_string(template, enhanced_params)
+  format_string(template, enhanced_params)
 }
 
 /// Translate numeric ranges with parameter substitution.
@@ -1961,7 +1959,7 @@ pub fn translate_range_with_params(
     |> dict.insert("from", int.to_string(from))
     |> dict.insert("to", int.to_string(to))
     |> dict.insert("total", int.to_string(to - from + 1))
-  format.format_string(template, enhanced_params)
+  format_string(template, enhanced_params)
 }
 
 /// Format numbers according to locale-specific conventions and format type.
@@ -3617,4 +3615,33 @@ pub fn add_param(
   value: String,
 ) -> FormatParams {
   dict.insert(params, key, value)
+}
+
+/// Perform parameter substitution in a template string.
+///
+/// Replaces {param} placeholders with actual values from the parameters.
+///
+/// ## Examples
+/// ```gleam
+/// let params = g18n.format_params()
+///   |> g18n.add_param("name", "Alice")
+///   |> g18n.add_param("count", "5")
+/// 
+/// g18n.format_string("Hello {name}, you have {count} messages", params)
+/// // "Hello Alice, you have 5 messages"
+/// ```
+fn format_string(template: String, params: FormatParams) -> String {
+  dict.fold(params, template, fn(acc, key, value) {
+    string.replace(acc, "{" <> key <> "}", value)
+  })
+}
+
+fn has_prefix(key_parts: List(String), prefix_parts: List(String)) -> Bool {
+  case prefix_parts, key_parts {
+    [], _ -> True
+    [prefix_head, ..prefix_tail], [key_head, ..key_tail]
+      if prefix_head == key_head
+    -> has_prefix(key_tail, prefix_tail)
+    _, _ -> False
+  }
 }
