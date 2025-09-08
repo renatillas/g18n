@@ -2,7 +2,6 @@ import g18n
 import g18n/locale
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
 import gleam/time/calendar
 import gleeunit
 
@@ -235,12 +234,11 @@ pub fn number_formatting_test() {
   let es_translator = g18n.new_translator(es_locale, translations)
 
   // Test basic number formatting
-  let en_formatted = g18n.format_number(en_translator, 1234.56, g18n.Decimal(2))
-  let es_formatted = g18n.format_number(es_translator, 1234.56, g18n.Decimal(2))
-
+  assert "1,234.56"
+    == g18n.format_number(en_translator, 1234.56, g18n.Decimal(2))
+  assert "1 234,56"
+    == g18n.format_number(es_translator, 1234.56, g18n.Decimal(2))
   // Both should format the number (exact format may vary)
-  assert string.contains(en_formatted, "1,234")
-  assert string.contains(es_formatted, "1 234")
 }
 
 pub fn currency_formatting_test() {
@@ -248,10 +246,8 @@ pub fn currency_formatting_test() {
   let translations = g18n.new_translations()
   let translator = g18n.new_translator(us_locale, translations)
 
-  let formatted =
-    g18n.format_number(translator, 1234.56, g18n.Currency("USD", 2))
-  assert string.contains(formatted, "1,234")
-  assert string.contains(formatted, "56")
+  assert "$1,234.56"
+    == g18n.format_number(translator, 1234.56, g18n.Currency("USD", 2))
 }
 
 pub fn currency_position_locale_test() {
@@ -313,16 +309,14 @@ pub fn number_precision_test() {
   // Rounded
 }
 
-pub fn date_formatting_test() {
+pub fn format_date_test() {
   let assert Ok(en_locale) = locale.new("en")
   let translations = g18n.new_translations()
   let translator = g18n.new_translator(en_locale, translations)
   let date = calendar.Date(2024, calendar.January, 15)
 
-  let formatted = g18n.format_date(translator, date, g18n.Full)
-  // Should include year and month name
-  assert string.contains(formatted, "2024")
-  assert string.contains(formatted, "January")
+  assert "Monday, January 15, 2024 GMT"
+    == g18n.format_date(translator, date, g18n.Full)
 }
 
 pub fn relative_time_test() {
@@ -459,10 +453,8 @@ pub fn export_validation_report_test() {
   // Missing "goodbye"
 
   let report = g18n.validate_translations(primary, target, es_locale)
-  let exported = g18n.export_validation_report(report)
-
-  assert string.contains(exported, "Translation Validation Report")
-  assert string.contains(exported, "es")
+  assert "Translation Validation Report\n================================\nCoverage: 50.0%\nTotal Keys: 2\nTranslated: 1\nErrors: 1\nWarnings: 0\n\nERRORS:\n  - Missing translation for 'goodbye' in es\n"
+    == g18n.export_validation_report(report)
 }
 
 pub fn translations_to_nested_json_test() {
@@ -644,10 +636,7 @@ pub fn format_time_test() {
   let translator = g18n.new_translator(en_locale, translations)
 
   let time = calendar.TimeOfDay(14, 30, 45, 0)
-  let formatted = g18n.format_time(translator, time, g18n.Short)
-
-  assert string.contains(formatted, "14") || string.contains(formatted, "2")
-  assert string.contains(formatted, "30")
+  assert "2:30 PM" == g18n.format_time(translator, time, g18n.Short)
 }
 
 pub fn format_datetime_test() {
@@ -658,12 +647,8 @@ pub fn format_datetime_test() {
   let date = calendar.Date(2024, calendar.January, 15)
   let time = calendar.TimeOfDay(14, 30, 45, 0)
 
-  let formatted = g18n.format_datetime(translator, date, time, g18n.Short)
-
-  // Short format shows "01/15/24" not "2024", so check for "24" and "15"
-  assert string.contains(formatted, "24") || string.contains(formatted, "2024")
-  assert string.contains(formatted, "15")
-  assert string.contains(formatted, "30")
+  assert "01/15/24 2:30 PM"
+    == g18n.format_datetime(translator, date, time, g18n.Short)
 }
 
 // Locale module tests
@@ -731,4 +716,103 @@ pub fn locale_quality_score_test() {
 
   let no_match_score = locale.locale_quality_score(en_us, es)
   assert no_match_score == 0.0
+}
+
+pub fn number_format_types_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let assert Ok(es_locale) = locale.new("es")
+  let translations = g18n.new_translations()
+  let en_translator = g18n.new_translator(en_locale, translations)
+  let es_translator = g18n.new_translator(es_locale, translations)
+
+  // Test Percentage format
+  assert g18n.format_number(en_translator, 0.75, g18n.Percentage(1)) == "75.0%"
+  assert g18n.format_number(es_translator, 0.25, g18n.Percentage(0)) == "25%"
+
+  // Test Scientific notation  
+  assert g18n.format_number(en_translator, 1234.56, g18n.Scientific(2)) == "1.23e3"
+  
+  // Test Compact format
+  assert g18n.format_number(en_translator, 1500.0, g18n.Compact) == "1.5K"
+  assert g18n.format_number(en_translator, 1500000.0, g18n.Compact) == "1.5M"
+  assert g18n.format_number(en_translator, 1500000000.0, g18n.Compact) == "1.5B"
+  assert g18n.format_number(es_translator, 2500.0, g18n.Compact) == "2.5k"
+}
+
+pub fn datetime_custom_format_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations = g18n.new_translations()
+  let translator = g18n.new_translator(en_locale, translations)
+  
+  let date = calendar.Date(2024, calendar.January, 15)
+  let time = calendar.TimeOfDay(14, 30, 45, 0)
+  
+  // Test custom date formats
+  assert g18n.format_date(translator, date, g18n.Custom("YYYY-MM-DD")) == "2024-01-15"
+  assert g18n.format_date(translator, date, g18n.Custom("DD/MM/YYYY")) == "15/01/2024"
+  
+  // Test custom time formats
+  assert g18n.format_time(translator, time, g18n.Custom("HH:mm")) == "14:30"
+  assert g18n.format_time(translator, time, g18n.Custom("HH:mm:ss")) == "14:30:45"
+  
+  // Test custom datetime formats
+  assert g18n.format_datetime(translator, date, time, g18n.Custom("YYYY-MM-DD HH:mm")) == "2024-01-15 14:30"
+}
+
+pub fn format_params_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations = g18n.new_translations()
+    |> g18n.add_translation("greeting", "Hello {name}, welcome to {place}!")
+  let translator = g18n.new_translator(en_locale, translations)
+
+  // Test format parameters creation and usage
+  let params = g18n.new_format_params()
+    |> g18n.add_param("name", "Alice")
+    |> g18n.add_param("place", "Paris")
+  
+  assert g18n.translate_with_params(translator, "greeting", params) == "Hello Alice, welcome to Paris!"
+  
+  // Test with missing parameter
+  let incomplete_params = g18n.new_format_params()
+    |> g18n.add_param("name", "Bob")
+  
+  assert g18n.translate_with_params(translator, "greeting", incomplete_params) == "Hello Bob, welcome to {place}!"
+}
+
+pub fn error_handling_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations = g18n.new_translations()
+  let translator = g18n.new_translator(en_locale, translations)
+  
+  // Test missing translation key - should return key itself
+  assert g18n.translate(translator, "nonexistent.key") == "nonexistent.key"
+  
+  // Test invalid JSON import
+  let assert Error(_) = g18n.translations_from_json("invalid json")
+  let assert Error(_) = g18n.translations_from_nested_json("invalid nested json")
+  
+  // Test empty/minimal inputs
+  let empty_translations = g18n.new_translations()
+  assert g18n.translations_to_json(empty_translations) == "{}"
+  assert g18n.translations_to_nested_json(empty_translations) == "{}"
+}
+
+pub fn validation_edge_cases_test() {
+  let assert Ok(es_locale) = locale.new("es")
+  
+  // Test validation with empty translations
+  let empty_primary = g18n.new_translations()
+  let empty_target = g18n.new_translations()
+  
+  let report = g18n.validate_translations(empty_primary, empty_target, es_locale)
+  assert report.total_keys == 0
+  assert report.translated_keys == 0
+  assert report.coverage == 0.0
+  
+  // Test parameter validation with no placeholders
+  let translations = g18n.new_translations()
+    |> g18n.add_translation("simple", "Simple message")
+  
+  let errors = g18n.validate_translation_parameters(translations, "simple", [], es_locale)
+  assert errors == []
 }
