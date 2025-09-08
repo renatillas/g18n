@@ -1,8 +1,7 @@
 import g18n
 import g18n/locale
 import gleam/list
-
-// import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/string
 import gleam/time/calendar
 import gleeunit
@@ -76,6 +75,32 @@ pub fn pluralization_test() {
   assert g18n.translate_plural(translator, "item", 1) == "1 item"
   assert g18n.translate_plural(translator, "item", 5) == "5 items"
   assert g18n.translate_plural(translator, "item", 0) == "0 items"
+}
+
+pub fn ordinal_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("place.first", "{ordinal} place")
+    |> g18n.add_translation("place.second", "{ordinal} place")
+    |> g18n.add_translation("place.third", "{ordinal} place")
+    |> g18n.add_translation("place.nth", "{ordinal} place")
+
+  let translator = g18n.new_translator(en_locale, translations)
+  let params = g18n.new_format_params()
+
+  assert g18n.translate_ordinal_with_params(translator, "place", 1, params)
+    == "1st place"
+  assert g18n.translate_ordinal_with_params(translator, "place", 2, params)
+    == "2nd place"
+  assert g18n.translate_ordinal_with_params(translator, "place", 3, params)
+    == "3rd place"
+  assert g18n.translate_ordinal_with_params(translator, "place", 4, params)
+    == "4th place"
+  assert g18n.translate_ordinal_with_params(translator, "place", 11, params)
+    == "11th place"
+  assert g18n.translate_ordinal_with_params(translator, "place", 21, params)
+    == "21st place"
 }
 
 pub fn context_sensitive_translation_test() {
@@ -276,4 +301,414 @@ pub fn context_variants_test() {
 
   let variants = g18n.context_variants(translations, "bank")
   assert list.length(variants) == 3
+}
+
+pub fn get_keys_with_prefix_test() {
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("ui.button.save", "Save")
+    |> g18n.add_translation("ui.button.cancel", "Cancel")
+    |> g18n.add_translation("ui.dialog.confirm", "Confirm")
+    |> g18n.add_translation("user.name", "Name")
+
+  let button_keys = g18n.get_keys_with_prefix(translations, "ui.button")
+  assert list.length(button_keys) == 2
+
+  let ui_keys = g18n.get_keys_with_prefix(translations, "ui")
+  assert list.length(ui_keys) == 3
+}
+
+pub fn extract_placeholders_test() {
+  let placeholders1 = g18n.extract_placeholders("Welcome {name}!")
+  assert placeholders1 == ["name"]
+
+  let placeholders2 = g18n.extract_placeholders("Hello {firstName} {lastName}")
+  assert placeholders2 == ["firstName", "lastName"]
+
+  let placeholders3 = g18n.extract_placeholders("No placeholders here")
+  assert placeholders3 == []
+}
+
+pub fn validate_translation_parameters_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("welcome", "Welcome {name}!")
+    |> g18n.add_translation("user_info", "User: {name}, Age: {age}")
+
+  let errors1 =
+    g18n.validate_translation_parameters(
+      translations,
+      "welcome",
+      ["name"],
+      en_locale,
+    )
+  assert errors1 == []
+
+  let errors2 =
+    g18n.validate_translation_parameters(
+      translations,
+      "user_info",
+      ["name"],
+      en_locale,
+    )
+  assert list.length(errors2) > 0
+  // Missing "age" parameter
+}
+
+pub fn translation_coverage_test() {
+  let primary =
+    g18n.new_translations()
+    |> g18n.add_translation("hello", "Hello")
+    |> g18n.add_translation("goodbye", "Goodbye")
+    |> g18n.add_translation("welcome", "Welcome")
+
+  let target =
+    g18n.new_translations()
+    |> g18n.add_translation("hello", "Hola")
+    |> g18n.add_translation("goodbye", "Adiós")
+  // Missing "welcome"
+
+  let coverage_pct = g18n.translation_coverage(primary, target)
+  assert coverage_pct >=. 0.0 && coverage_pct <=. 1.0
+  // Should be a percentage between 0 and 1
+}
+
+pub fn find_unused_translations_test() {
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("hello", "Hello")
+    |> g18n.add_translation("goodbye", "Goodbye")
+    |> g18n.add_translation("unused_key", "Unused")
+
+  let used_keys = ["hello", "goodbye"]
+  // "unused_key" is not used
+  let unused = g18n.find_unused_translations(translations, used_keys)
+  assert list.length(unused) == 1
+}
+
+pub fn export_validation_report_test() {
+  let assert Ok(es_locale) = locale.new("es")
+  let primary =
+    g18n.new_translations()
+    |> g18n.add_translation("hello", "Hello")
+    |> g18n.add_translation("goodbye", "Goodbye")
+
+  let target =
+    g18n.new_translations()
+    |> g18n.add_translation("hello", "Hola")
+  // Missing "goodbye"
+
+  let report = g18n.validate_translations(primary, target, es_locale)
+  let exported = g18n.export_validation_report(report)
+
+  assert string.contains(exported, "Translation Validation Report")
+  assert string.contains(exported, "es")
+}
+
+pub fn translations_to_nested_json_test() {
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("ui.button.save", "Save")
+    |> g18n.add_translation("ui.button.cancel", "Cancel")
+    |> g18n.add_translation(
+      "very.nested.json.structure.that.will.fail.sometimes",
+      "Nested",
+    )
+    |> g18n.add_translation("user.name", "Name")
+
+  let nested_json = g18n.translations_to_nested_json(translations)
+
+  // Debug: print what we got
+  // io.println("Nested JSON: " <> nested_json)
+
+  case g18n.translations_from_nested_json(nested_json) {
+    Ok(reimported) -> {
+      let assert Ok(en_locale) = locale.new("en")
+      let translator = g18n.new_translator(en_locale, reimported)
+
+      // Test that roundtrip conversion works
+      assert g18n.translate(translator, "ui.button.save") == "Save"
+      assert g18n.translate(translator, "ui.button.cancel") == "Cancel"
+      assert g18n.translate(translator, "user.name") == "Name"
+      assert g18n.translate(
+          translator,
+          "very.nested.json.structure.that.will.fail.sometimes",
+        )
+        == "Nested"
+    }
+    Error(msg) -> {
+      // io.println("Error parsing nested JSON: " <> msg)
+      panic as msg
+    }
+  }
+}
+
+pub fn translate_with_context_and_params_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_context_translation("open", "file", "Open {filename}")
+    |> g18n.add_context_translation("open", "door", "Open the {location} door")
+
+  let translator = g18n.new_translator(en_locale, translations)
+  let params = g18n.new_format_params() |> g18n.add_param("filename", "doc.pdf")
+
+  let result =
+    g18n.translate_with_context_and_params(
+      translator,
+      "open",
+      g18n.Context("file"),
+      params,
+    )
+  assert result == "Open doc.pdf"
+}
+
+pub fn translate_plural_with_params_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("item.one", "1 {type}")
+    |> g18n.add_translation("item.other", "{count} {type}s")
+
+  let translator = g18n.new_translator(en_locale, translations)
+  let params = g18n.new_format_params() |> g18n.add_param("type", "book")
+
+  assert g18n.translate_plural_with_params(translator, "item", 1, params)
+    == "1 book"
+  assert g18n.translate_plural_with_params(translator, "item", 5, params)
+    == "5 books"
+}
+
+pub fn translate_cardinal_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("item.one", "1 item")
+    |> g18n.add_translation("item.other", "{count} items")
+
+  let translator = g18n.new_translator(en_locale, translations)
+
+  assert g18n.translate_cardinal(translator, "item", 1) == "1 item"
+  assert g18n.translate_cardinal(translator, "item", 5) == "5 items"
+}
+
+pub fn translate_ordinal_basic_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("place.first", "1st place")
+    |> g18n.add_translation("place.second", "2nd place")
+    |> g18n.add_translation("place.third", "3rd place")
+    |> g18n.add_translation("place.nth", "4th place")
+
+  let translator = g18n.new_translator(en_locale, translations)
+
+  assert g18n.translate_ordinal(translator, "place", 1) == "1st place"
+  assert g18n.translate_ordinal(translator, "place", 2) == "2nd place"
+  assert g18n.translate_ordinal(translator, "place", 4) == "4th place"
+}
+
+pub fn translate_range_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("selection.single", "1 item selected")
+    |> g18n.add_translation("selection.range", "3-7 items selected")
+
+  let translator = g18n.new_translator(en_locale, translations)
+
+  assert g18n.translate_range(translator, "selection", 1, 1)
+    == "1 item selected"
+  assert g18n.translate_range(translator, "selection", 3, 7)
+    == "3-7 items selected"
+}
+
+pub fn translate_range_with_params_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("selection.single", "1 {type} selected")
+    |> g18n.add_translation("selection.range", "{from}-{to} {type}s selected")
+
+  let translator = g18n.new_translator(en_locale, translations)
+  let params = g18n.new_format_params() |> g18n.add_param("type", "file")
+
+  assert g18n.translate_range_with_params(translator, "selection", 1, 1, params)
+    == "1 file selected"
+  assert g18n.translate_range_with_params(translator, "selection", 3, 5, params)
+    == "3-5 files selected"
+}
+
+pub fn translator_getter_functions_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let assert Ok(es_locale) = locale.new("es")
+  let en_translations =
+    g18n.new_translations() |> g18n.add_translation("hello", "Hello")
+  let es_translations =
+    g18n.new_translations() |> g18n.add_translation("hola", "Hola")
+
+  let translator =
+    g18n.new_translator(en_locale, en_translations)
+    |> g18n.with_fallback(es_locale, es_translations)
+
+  assert locale.to_string(g18n.locale(translator)) == "en"
+
+  case g18n.fallback_locale(translator) {
+    Some(fallback) -> {
+      assert locale.to_string(fallback) == "es"
+    }
+    None -> panic as "Expected fallback locale"
+  }
+
+  let primary_trans = g18n.translations(translator)
+  assert g18n.translate(g18n.new_translator(en_locale, primary_trans), "hello")
+    == "Hello"
+
+  case g18n.fallback_translations(translator) {
+    Some(_) -> {
+      Nil
+      // Has fallback translations
+    }
+    None -> panic as "Expected fallback translations"
+  }
+}
+
+pub fn namespace_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations =
+    g18n.new_translations()
+    |> g18n.add_translation("ui.button.save", "Save")
+    |> g18n.add_translation("ui.button.cancel", "Cancel")
+    |> g18n.add_translation("ui.dialog.confirm", "Confirm")
+    |> g18n.add_translation("user.name", "Name")
+
+  let translator = g18n.new_translator(en_locale, translations)
+  let ui_namespace = g18n.namespace(translator, "ui")
+
+  assert list.length(ui_namespace) == 3
+  // Should contain 3 UI-related keys
+
+  // Check if the ui.button.save key-value pair is in the namespace
+  let has_save =
+    list.any(ui_namespace, fn(kv) {
+      let #(key, value) = kv
+      key == "ui.button.save" && value == "Save"
+    })
+  assert has_save == True
+}
+
+pub fn format_time_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations = g18n.new_translations()
+  let translator = g18n.new_translator(en_locale, translations)
+
+  let time = calendar.TimeOfDay(14, 30, 45, 0)
+  let formatted = g18n.format_time(translator, time, g18n.Short)
+
+  assert string.contains(formatted, "14") || string.contains(formatted, "2")
+  assert string.contains(formatted, "30")
+}
+
+pub fn format_datetime_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let translations = g18n.new_translations()
+  let translator = g18n.new_translator(en_locale, translations)
+
+  let date = calendar.Date(2024, calendar.January, 15)
+  let time = calendar.TimeOfDay(14, 30, 45, 0)
+
+  let formatted = g18n.format_datetime(translator, date, time, g18n.Short)
+
+  // Short format shows "01/15/24" not "2024", so check for "24" and "15"
+  assert string.contains(formatted, "24") || string.contains(formatted, "2024")
+  assert string.contains(formatted, "15")
+  assert string.contains(formatted, "30")
+}
+
+// Locale module tests
+pub fn locale_language_region_test() {
+  let assert Ok(en_us) = locale.new("en-US")
+  let assert Ok(pt) = locale.new("pt")
+
+  assert locale.language(en_us) == "en"
+  assert locale.language(pt) == "pt"
+
+  case locale.region(en_us) {
+    Some(region) -> {
+      assert region == "US"
+    }
+    None -> panic as "Expected region"
+  }
+
+  case locale.region(pt) {
+    Some(_) -> panic as "Expected no region"
+    None -> {
+      Nil
+    }
+  }
+}
+
+pub fn locale_matching_test() {
+  let assert Ok(en_us) = locale.new("en-US")
+  let assert Ok(en_gb) = locale.new("en-GB")
+  let assert Ok(es) = locale.new("es")
+  let assert Ok(en_us2) = locale.new("en-US")
+
+  assert locale.match_language(en_us, en_gb) == True
+  assert locale.match_language(en_us, es) == False
+
+  assert locale.exact_match(en_us, en_us2) == True
+  assert locale.exact_match(en_us, en_gb) == False
+
+  let en_only = locale.language_only(en_us)
+  assert locale.to_string(en_only) == "en"
+}
+
+pub fn locale_negotiation_test() {
+  let assert Ok(en) = locale.new("en")
+  let assert Ok(en_us) = locale.new("en-US")
+  let assert Ok(es) = locale.new("es")
+  let assert Ok(fr) = locale.new("fr")
+  let assert Ok(en_gb) = locale.new("en-GB")
+
+  let available = [en, en_us, es]
+  let preferred_with_gb = [en_gb, fr]
+  // en-GB not available, should match en or en_us
+
+  case locale.negotiate_locale(available, preferred_with_gb) {
+    Ok(matched) -> {
+      assert locale.language(matched) == "en"
+      // Should match en or en_us
+    }
+    Error(_) -> panic as "Expected to find a match"
+  }
+}
+
+pub fn parse_accept_language_test() {
+  let parsed = locale.parse_accept_language("en-US,en;q=0.9,fr;q=0.8,es;q=0.7")
+  assert list.length(parsed) >= 3
+
+  let first = case list.first(parsed) {
+    Ok(parsed_locale) -> parsed_locale
+    Error(_) -> panic as "Expected at least one locale"
+  }
+
+  assert locale.language(first) == "en"
+}
+
+pub fn locale_quality_score_test() {
+  let assert Ok(en_us) = locale.new("en-US")
+  let assert Ok(en_gb) = locale.new("en-GB")
+  let assert Ok(_en) = locale.new("en")
+  let assert Ok(es) = locale.new("es")
+
+  let exact_score = locale.locale_quality_score(en_us, en_us)
+  assert exact_score == 1.0
+
+  let lang_score = locale.locale_quality_score(en_us, en_gb)
+  assert lang_score == 0.8
+
+  let no_match_score = locale.locale_quality_score(en_us, es)
+  assert no_match_score == 0.0
 }

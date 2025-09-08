@@ -6,11 +6,11 @@ licences = ["MIT"]
 repository = { type = "github", user = "renatillas", repo = "g18n" }
 links = [{ title = "Website", href = "https://github.com/renatillas/g18n" }]
 
-# Package metadata
-[package]
-authors = ["Renata Amutio"]
-# For a full reference of all the available options, you can have a look at
-# https://gleam.run/writing-gleam/gleam-toml/.
+[documentation]
+pages = [
+  { title = " ", path = "#", source = "" },
+  { title = "Syntax guide", path = "syntax_guide.html", source = "./pages/syntax_guide.md" },
+]
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"

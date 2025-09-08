@@ -937,17 +937,24 @@ pub fn translations_to_json(translations: Translations) -> String {
 pub fn translations_from_nested_json(
   json_string: String,
 ) -> Result(Translations, String) {
-  case json.parse(json_string, decode.dict(decode.string, decode.dynamic)) {
-    Ok(dict_result) -> {
-      let flattened_dict = flatten_json_object(dict_result, "")
-      let trie_result =
-        dict.fold(flattened_dict, new_translations(), fn(trie, key, value) {
-          let key_parts = string.split(key, ".")
-          Translations(trie.insert(trie.translations, key_parts, value))
-        })
-      Ok(trie_result)
+  case json.parse(json_string, decode.dynamic) {
+    Ok(dynamic_result) -> {
+      case
+        decode.run(dynamic_result, decode.dict(decode.string, decode.dynamic))
+      {
+        Ok(dict_result) -> {
+          flatten_json_object(dict_result, "")
+          |> dict.fold(new_translations(), fn(trie, key, value) {
+            string.split(key, ".")
+            |> trie.insert(trie.translations, _, value)
+            |> Translations
+          })
+          |> Ok
+        }
+        Error(_) -> Error("Failed to decode as dictionary")
+      }
     }
-    Error(_) -> Error("Failed to parse nested JSON: ")
+    Error(_) -> Error("Failed to parse nested JSON")
   }
 }
 
@@ -988,18 +995,15 @@ fn flatten_json_object(
       "" -> key
       _ -> prefix <> "." <> key
     }
-
     case decode.run(value, decode.dict(decode.string, decode.dynamic)) {
       Ok(nested_dict) -> {
-        let nested_flattened = flatten_json_object(nested_dict, current_key)
-        dict.fold(nested_flattened, acc, dict.insert)
+        flatten_json_object(nested_dict, current_key)
+        |> dict.fold(acc, dict.insert)
       }
       Error(_) -> {
-        // Try to decode as string
         case decode.run(value, decode.string) {
           Ok(str_value) -> dict.insert(acc, current_key, str_value)
           Error(_) -> acc
-          // Skip non-string values
         }
       }
     }
@@ -1008,29 +1012,44 @@ fn flatten_json_object(
 
 // Convert trie directly to nested JSON structure
 fn trie_to_nested_json(translations: Translations) -> json.Json {
-  // Collect all key-value pairs from trie
-  let all_pairs =
-    trie.fold(translations.translations, [], fn(acc, key_parts, value) {
-      [#(key_parts, value), ..acc]
+  // First convert trie to flat dictionary for easier processing
+  let flat_dict =
+    trie.fold(translations.translations, dict.new(), fn(acc, key_parts, value) {
+      let flat_key = string.join(key_parts, ".")
+      dict.insert(acc, flat_key, value)
     })
 
-  // Build nested structure from key parts
-  build_nested_structure(all_pairs)
+  // Then build nested structure from flat keys
+  build_nested_from_flat(flat_dict)
 }
 
-// Build nested JSON structure from list of (key_parts, value) pairs
-fn build_nested_structure(pairs: List(#(List(String), String))) -> json.Json {
-  pairs
-  |> list.fold(dict.new(), fn(acc, pair) {
-    let #(key_parts, value) = pair
-    insert_at_path(acc, key_parts, json.string(value))
-  })
+// Build nested JSON structure from flat dictionary  
+fn build_nested_from_flat(flat_dict: Dict(String, String)) -> json.Json {
+  // Create a mutable state structure to track nested paths
+  flat_dict
+  |> dict.to_list
+  |> build_nested_recursive(dict.new())
   |> dict.to_list
   |> json.object
 }
 
-// Insert value at nested path in dict
-fn insert_at_path(
+// Recursively build nested structure by processing flat keys
+fn build_nested_recursive(
+  flat_pairs: List(#(String, String)),
+  acc: Dict(String, json.Json),
+) -> Dict(String, json.Json) {
+  case flat_pairs {
+    [] -> acc
+    [#(flat_key, value), ..rest] -> {
+      let key_parts = string.split(flat_key, ".")
+      let updated_acc = set_nested_value(acc, key_parts, json.string(value))
+      build_nested_recursive(rest, updated_acc)
+    }
+  }
+}
+
+// Set a value in nested structure, creating intermediate objects as needed
+fn set_nested_value(
   dict_acc: Dict(String, json.Json),
   key_parts: List(String),
   value: json.Json,
@@ -1039,21 +1058,69 @@ fn insert_at_path(
     [] -> dict_acc
     [single_key] -> dict.insert(dict_acc, single_key, value)
     [first_key, ..remaining_keys] -> {
-      let existing = case dict.get(dict_acc, first_key) {
-        Ok(json_obj) -> extract_dict_from_json(json_obj)
+      // Get or create the nested structure
+      let nested_dict = case dict.get(dict_acc, first_key) {
+        Ok(existing_json) -> {
+          // Convert JSON back to string and parse it to extract dict
+          let json_str = json.to_string(existing_json)
+          case
+            json.parse(json_str, decode.dict(decode.string, decode.dynamic))
+          {
+            Ok(dynamic_dict) -> {
+              // Convert dynamic dict back to json dict
+              dict.fold(dynamic_dict, dict.new(), fn(acc, key, dyn_val) {
+                case decode.run(dyn_val, decode.string) {
+                  Ok(str_val) -> dict.insert(acc, key, json.string(str_val))
+                  Error(_) -> {
+                    // Try to handle nested objects recursively
+                    case
+                      decode.run(
+                        dyn_val,
+                        decode.dict(decode.string, decode.dynamic),
+                      )
+                    {
+                      Ok(nested_dynamic_dict) -> {
+                        let nested_json_dict =
+                          dict.fold(
+                            nested_dynamic_dict,
+                            dict.new(),
+                            fn(inner_acc, inner_key, inner_dyn_val) {
+                              case decode.run(inner_dyn_val, decode.string) {
+                                Ok(inner_str_val) ->
+                                  dict.insert(
+                                    inner_acc,
+                                    inner_key,
+                                    json.string(inner_str_val),
+                                  )
+                                Error(_) -> inner_acc
+                              }
+                            },
+                          )
+                        dict.insert(
+                          acc,
+                          key,
+                          dict.to_list(nested_json_dict) |> json.object,
+                        )
+                      }
+                      Error(_) -> acc
+                    }
+                  }
+                }
+              })
+            }
+            Error(_) -> dict.new()
+          }
+        }
         Error(_) -> dict.new()
       }
-      let updated = insert_at_path(existing, remaining_keys, value)
-      dict.insert(dict_acc, first_key, dict.to_list(updated) |> json.object)
-    }
-  }
-}
 
-// Extract dict from JSON object, return empty dict if not object
-fn extract_dict_from_json(json_val: json.Json) -> Dict(String, json.Json) {
-  case json_val {
-    _ -> dict.new()
-    // For now, return empty dict - will improve later
+      let updated_nested = set_nested_value(nested_dict, remaining_keys, value)
+      dict.insert(
+        dict_acc,
+        first_key,
+        dict.to_list(updated_nested) |> json.object,
+      )
+    }
   }
 }
 
@@ -1921,7 +1988,6 @@ pub fn translate_ordinal_with_params(
   let template = translate_ordinal(translator, key, position)
   let enhanced_params =
     params
-    |> dict.insert("position", int.to_string(position))
     |> dict.insert(
       "ordinal",
       locale.ordinal_suffix(translator.locale, position),
