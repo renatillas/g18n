@@ -2321,8 +2321,27 @@ fn decimal(number: Float, precision: Int, language: String) -> String {
   let decimal_separator = decimal_separator(language)
   let thousands_separator = thousands_separator(language)
 
-  let formatted_number =
-    float.to_precision(number, precision) |> float.to_string
+  let formatted_number = case precision {
+    0 -> number |> float.round |> int.to_string
+    _ -> {
+      // Format to exact precision by splitting and padding
+      let base_number = float.to_precision(number, precision) |> float.to_string
+      case string.split(base_number, ".") {
+        [integer_part] -> integer_part <> "." <> string.repeat("0", precision)
+        [integer_part, decimal_part] -> {
+          let padded_decimal = case string.length(decimal_part) < precision {
+            True ->
+              decimal_part
+              <> string.repeat("0", precision - string.length(decimal_part))
+            False -> string.slice(decimal_part, 0, precision)
+          }
+          integer_part <> "." <> padded_decimal
+        }
+        _ -> base_number
+      }
+    }
+  }
+
   add_thousands_separators(
     formatted_number,
     decimal_separator,
@@ -2341,9 +2360,18 @@ fn currency(
   let currency_position = currency_position(language)
 
   case currency_position {
-    "before" -> currency_symbol <> formatted_amount
-    "after" -> formatted_amount <> " " <> currency_symbol
-    _ -> currency_symbol <> formatted_amount
+    Before -> currency_symbol <> formatted_amount
+    After -> {
+      let space = case language {
+        "es" -> ""
+        // Spanish: 24€ (no space)
+        "fr" | "de" | "it" -> " "
+        // French/German/Italian: 24 € (with space)
+        _ -> " "
+        // Default with space
+      }
+      formatted_amount <> space <> currency_symbol
+    }
   }
 }
 
@@ -2431,12 +2459,20 @@ fn currency_symbol(currency_code: String) -> String {
   }
 }
 
-fn currency_position(language: String) -> String {
+type CurrencyPosition {
+  Before
+  After
+}
+
+fn currency_position(language: String) -> CurrencyPosition {
   case language {
-    "en" -> "before"
-    "pt" | "es" | "fr" -> "before"
-    "de" -> "after"
-    _ -> "before"
+    "en" -> Before
+    "pt" -> Before
+    "es" -> After
+    "fr" -> After
+    "de" -> After
+    "it" -> After
+    _ -> Before
   }
 }
 

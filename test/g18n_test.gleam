@@ -254,6 +254,65 @@ pub fn currency_formatting_test() {
   assert string.contains(formatted, "56")
 }
 
+pub fn currency_position_locale_test() {
+  let assert Ok(es_locale) = locale.new("es")
+  let assert Ok(fr_locale) = locale.new("fr")
+  let assert Ok(de_locale) = locale.new("de")
+  let assert Ok(en_locale) = locale.new("en")
+  let translations = g18n.new_translations()
+
+  let es_translator = g18n.new_translator(es_locale, translations)
+  let fr_translator = g18n.new_translator(fr_locale, translations)
+  let de_translator = g18n.new_translator(de_locale, translations)
+  let en_translator = g18n.new_translator(en_locale, translations)
+
+  // Test Spanish: 24€ (no space, currency after, 0 precision = no decimals)
+  let spanish = g18n.format_number(es_translator, 24.0, g18n.Currency("EUR", 0))
+  assert spanish == "24€"
+
+  // Test French: 24 € (space, currency after, 0 precision = no decimals)
+  let french = g18n.format_number(fr_translator, 24.0, g18n.Currency("EUR", 0))
+  assert french == "24 €"
+
+  // Test German: 24 € (space, currency after, 0 precision = no decimals)  
+  let german = g18n.format_number(de_translator, 24.0, g18n.Currency("EUR", 0))
+  assert german == "24 €"
+
+  // Test English: $24 (currency before, 0 precision = no decimals)
+  let english = g18n.format_number(en_translator, 24.0, g18n.Currency("USD", 0))
+  assert english == "$24"
+}
+
+pub fn number_precision_test() {
+  let assert Ok(en_locale) = locale.new("en")
+  let assert Ok(es_locale) = locale.new("es")
+  let translations = g18n.new_translations()
+  let en_translator = g18n.new_translator(en_locale, translations)
+  let es_translator = g18n.new_translator(es_locale, translations)
+
+  // Test 0 precision - should show no decimals
+  assert g18n.format_number(en_translator, 24.0, g18n.Decimal(0)) == "24"
+  assert g18n.format_number(es_translator, 24.0, g18n.Decimal(0)) == "24"
+
+  // Test 2 precision - should show exactly 2 decimals  
+  assert g18n.format_number(en_translator, 24.0, g18n.Decimal(2)) == "24.00"
+  assert g18n.format_number(es_translator, 24.0, g18n.Decimal(2)) == "24,00"
+
+  // Test with currency and 0 precision
+  assert g18n.format_number(en_translator, 24.56, g18n.Currency("USD", 0))
+    == "$25"
+  // Rounded
+  assert g18n.format_number(es_translator, 24.56, g18n.Currency("EUR", 0))
+    == "25€"
+  // Rounded
+
+  // Test with various precision values  
+  assert g18n.format_number(en_translator, 123.4, g18n.Decimal(3)) == "123.400"
+  assert g18n.format_number(es_translator, 123.456789, g18n.Decimal(2))
+    == "123,46"
+  // Rounded
+}
+
 pub fn date_formatting_test() {
   let assert Ok(en_locale) = locale.new("en")
   let translations = g18n.new_translations()

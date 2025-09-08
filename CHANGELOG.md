@@ -2,15 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.1.0] - 2025-09-08
 
 ### Fixed
 
 - **BREAKING**: Fixed `translations_from_nested_json()` - Now properly handles deeply nested JSON structures
 - **BREAKING**: Fixed ordinal suffix logic - `ordinal_suffix()` now includes position in output
+- **BREAKING**: Fixed currency positioning for Spanish, French, and Italian locales (now displays "24€" instead of "€24")
+- Fixed number precision formatting - 0 precision now shows "24" instead of "24.0", 2 precision shows "24.00" instead of "24.0"
+- Fixed currency spacing - Spanish uses no space ("24€"), while French/German/Italian use space ("24 €")
 - Improved nested JSON conversion using `decode.recursive` for better performance
-
-### Changed
 
 ## [2.0.0] - 2025-09-07
 

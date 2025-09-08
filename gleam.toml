@@ -8,7 +8,7 @@ links = [{ title = "Website", href = "https://github.com/renatillas/g18n" }]
 
 [documentation]
 pages = [
-  { title = " ", path = "#", source = "" },
+  { title = "Changelog", path = "changelog.html", source = "./CHANGELOG.md" },
   { title = "Syntax guide", path = "syntax_guide.html", source = "./pages/syntax_guide.md" },
 ]
 
