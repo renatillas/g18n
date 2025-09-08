@@ -1058,70 +1058,35 @@ fn set_nested_value(
     [] -> dict_acc
     [single_key] -> dict.insert(dict_acc, single_key, value)
     [first_key, ..remaining_keys] -> {
-      // Get or create the nested structure
-      let nested_dict = case dict.get(dict_acc, first_key) {
-        Ok(existing_json) -> {
-          // Convert JSON back to string and parse it to extract dict
-          let json_str = json.to_string(existing_json)
-          case
-            json.parse(json_str, decode.dict(decode.string, decode.dynamic))
-          {
-            Ok(dynamic_dict) -> {
-              // Convert dynamic dict back to json dict
-              dict.fold(dynamic_dict, dict.new(), fn(acc, key, dyn_val) {
-                case decode.run(dyn_val, decode.string) {
-                  Ok(str_val) -> dict.insert(acc, key, json.string(str_val))
-                  Error(_) -> {
-                    // Try to handle nested objects recursively
-                    case
-                      decode.run(
-                        dyn_val,
-                        decode.dict(decode.string, decode.dynamic),
-                      )
-                    {
-                      Ok(nested_dynamic_dict) -> {
-                        let nested_json_dict =
-                          dict.fold(
-                            nested_dynamic_dict,
-                            dict.new(),
-                            fn(inner_acc, inner_key, inner_dyn_val) {
-                              case decode.run(inner_dyn_val, decode.string) {
-                                Ok(inner_str_val) ->
-                                  dict.insert(
-                                    inner_acc,
-                                    inner_key,
-                                    json.string(inner_str_val),
-                                  )
-                                Error(_) -> inner_acc
-                              }
-                            },
-                          )
-                        dict.insert(
-                          acc,
-                          key,
-                          dict.to_list(nested_json_dict) |> json.object,
-                        )
-                      }
-                      Error(_) -> acc
-                    }
-                  }
-                }
-              })
-            }
-            Error(_) -> dict.new()
-          }
-        }
+      case dict.get(dict_acc, first_key) {
+        Ok(existing_json) -> extract_json_dict(existing_json)
         Error(_) -> dict.new()
       }
-
-      let updated_nested = set_nested_value(nested_dict, remaining_keys, value)
-      dict.insert(
-        dict_acc,
-        first_key,
-        dict.to_list(updated_nested) |> json.object,
-      )
+      |> set_nested_value(remaining_keys, value)
+      |> dict.to_list()
+      |> json.object
+      |> dict.insert(dict_acc, first_key, _)
     }
   }
+}
+
+// Extract a dictionary from JSON using decode.recursive
+fn extract_json_dict(json_val: json.Json) -> Dict(String, json.Json) {
+  let json_str = json.to_string(json_val)
+
+  case json.parse(json_str, decode.dict(decode.string, json_value_decoder())) {
+    Ok(parsed_dict) -> parsed_dict
+    Error(_) -> dict.new()
+  }
+}
+
+// Recursive decoder for JSON values that can be either strings or nested objects
+fn json_value_decoder() -> decode.Decoder(json.Json) {
+  use <- decode.recursive
+  decode.one_of(decode.string |> decode.map(json.string), [
+    decode.dict(decode.string, json_value_decoder())
+    |> decode.map(fn(dict_val) { dict.to_list(dict_val) |> json.object }),
+  ])
 }
 
 /// Main entry point for the g18n CLI tool.
