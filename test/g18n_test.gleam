@@ -481,26 +481,19 @@ pub fn translations_to_nested_json_test() {
   // Debug: print what we got
   // io.println("Nested JSON: " <> nested_json)
 
-  case g18n.translations_from_nested_json(nested_json) {
-    Ok(reimported) -> {
-      let assert Ok(en_locale) = locale.new("en")
-      let translator = g18n.new_translator(en_locale, reimported)
+  let assert Ok(reimported) = g18n.translations_from_nested_json(nested_json)
+  let assert Ok(en_locale) = locale.new("en")
+  let translator = g18n.new_translator(en_locale, reimported)
 
-      // Test that roundtrip conversion works
-      assert g18n.translate(translator, "ui.button.save") == "Save"
-      assert g18n.translate(translator, "ui.button.cancel") == "Cancel"
-      assert g18n.translate(translator, "user.name") == "Name"
-      assert g18n.translate(
-          translator,
-          "very.nested.json.structure.that.will.fail.sometimes",
-        )
-        == "Nested"
-    }
-    Error(msg) -> {
-      // io.println("Error parsing nested JSON: " <> msg)
-      panic as msg
-    }
-  }
+  // Test that roundtrip conversion works
+  assert g18n.translate(translator, "ui.button.save") == "Save"
+  assert g18n.translate(translator, "ui.button.cancel") == "Cancel"
+  assert g18n.translate(translator, "user.name") == "Name"
+  assert g18n.translate(
+      translator,
+      "very.nested.json.structure.that.will.fail.sometimes",
+    )
+    == "Nested"
 }
 
 pub fn translate_with_context_and_params_test() {
@@ -613,24 +606,14 @@ pub fn translator_getter_functions_test() {
 
   assert locale.to_string(g18n.locale(translator)) == "en"
 
-  case g18n.fallback_locale(translator) {
-    Some(fallback) -> {
-      assert locale.to_string(fallback) == "es"
-    }
-    None -> panic as "Expected fallback locale"
-  }
+  let assert Some(fallback) = g18n.fallback_locale(translator)
+  assert locale.to_string(fallback) == "es"
 
   let primary_trans = g18n.translations(translator)
   assert g18n.translate(g18n.new_translator(en_locale, primary_trans), "hello")
     == "Hello"
 
-  case g18n.fallback_translations(translator) {
-    Some(_) -> {
-      Nil
-      // Has fallback translations
-    }
-    None -> panic as "Expected fallback translations"
-  }
+  let assert Some(_) = g18n.fallback_translations(translator)
 }
 
 pub fn namespace_test() {
@@ -649,12 +632,10 @@ pub fn namespace_test() {
   // Should contain 3 UI-related keys
 
   // Check if the ui.button.save key-value pair is in the namespace
-  let has_save =
-    list.any(ui_namespace, fn(kv) {
-      let #(key, value) = kv
-      key == "ui.button.save" && value == "Save"
-    })
-  assert has_save == True
+  assert list.any(ui_namespace, fn(kv) {
+    let #(key, value) = kv
+    key == "ui.button.save" && value == "Save"
+  })
 }
 
 pub fn format_time_test() {
@@ -693,19 +674,9 @@ pub fn locale_language_region_test() {
   assert locale.language(en_us) == "en"
   assert locale.language(pt) == "pt"
 
-  case locale.region(en_us) {
-    Some(region) -> {
-      assert region == "US"
-    }
-    None -> panic as "Expected region"
-  }
+  let assert Some("US") = locale.region(en_us)
 
-  case locale.region(pt) {
-    Some(_) -> panic as "Expected no region"
-    None -> {
-      Nil
-    }
-  }
+  let assert None = locale.region(pt)
 }
 
 pub fn locale_matching_test() {
@@ -714,11 +685,11 @@ pub fn locale_matching_test() {
   let assert Ok(es) = locale.new("es")
   let assert Ok(en_us2) = locale.new("en-US")
 
-  assert locale.match_language(en_us, en_gb) == True
-  assert locale.match_language(en_us, es) == False
+  assert locale.match_language(en_us, en_gb)
+  assert !locale.match_language(en_us, es)
 
-  assert locale.exact_match(en_us, en_us2) == True
-  assert locale.exact_match(en_us, en_gb) == False
+  assert locale.exact_match(en_us, en_us2)
+  assert !locale.exact_match(en_us, en_gb)
 
   let en_only = locale.language_only(en_us)
   assert locale.to_string(en_only) == "en"
@@ -735,31 +706,21 @@ pub fn locale_negotiation_test() {
   let preferred_with_gb = [en_gb, fr]
   // en-GB not available, should match en or en_us
 
-  case locale.negotiate_locale(available, preferred_with_gb) {
-    Ok(matched) -> {
-      assert locale.language(matched) == "en"
-      // Should match en or en_us
-    }
-    Error(_) -> panic as "Expected to find a match"
-  }
+  let assert Ok(matched) = locale.negotiate_locale(available, preferred_with_gb)
+  assert locale.language(matched) == "en"
 }
 
 pub fn parse_accept_language_test() {
   let parsed = locale.parse_accept_language("en-US,en;q=0.9,fr;q=0.8,es;q=0.7")
   assert list.length(parsed) >= 3
 
-  let first = case list.first(parsed) {
-    Ok(parsed_locale) -> parsed_locale
-    Error(_) -> panic as "Expected at least one locale"
-  }
-
+  let assert Ok(first) = list.first(parsed)
   assert locale.language(first) == "en"
 }
 
 pub fn locale_quality_score_test() {
   let assert Ok(en_us) = locale.new("en-US")
   let assert Ok(en_gb) = locale.new("en-GB")
-  let assert Ok(_en) = locale.new("en")
   let assert Ok(es) = locale.new("es")
 
   let exact_score = locale.locale_quality_score(en_us, en_us)
