@@ -1,5 +1,5 @@
 name = "g18n"
-version = "2.0.0"
+version = "2.0.1"
 
 description = "A comprehensive platform-agnostic internationalization library for Gleam with multi-language date/time formatting, pluralization rules, and locale-aware number formatting"
 licences = ["MIT"]

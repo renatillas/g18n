@@ -4,10 +4,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-
-- Comprehensive test coverage for all public functions (40 tests total)
-
 ### Fixed
 
 - **BREAKING**: Fixed `translations_from_nested_json()` - Now properly handles deeply nested JSON structures
