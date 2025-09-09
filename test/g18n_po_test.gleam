@@ -1,6 +1,6 @@
 import g18n
+import g18n/internal/po
 import g18n/locale
-import g18n/po
 import gleam/dict
 import gleam/int
 import gleam/list
