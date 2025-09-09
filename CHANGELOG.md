@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0]
+
+### Added
+
+- **PO File Support**: Complete gettext PO/POT file format support
+  - `translations_from_po()` - Import PO file content into g18n translations
+  - `translations_to_po()` - Export g18n translations to PO format
+  - `generate_po` CLI command - Generate Gleam modules from PO files
+  - Full PO format features: contexts (msgctxt), multiline strings, escape sequences
+  - Comprehensive comment support: translator notes, source references, flags
+  - Performance optimized for 1000+ translation entries
+  - Seamless integration with existing g18n workflow and features
+
 ## [2.0.1] - 2025-09-08
 
 ### Fixed

@@ -140,7 +140,9 @@ g18n.format_relative_time(en_translator, g18n.Hours(2), g18n.Past) // "2 hours a
 g18n.format_number(en_translator, 1234.56, g18n.Currency("USD", 2)) // "$1,234.56"
 ```
 
-## CLI Code Generation
+## File Format Support
+
+g18n supports multiple file formats for maximum compatibility with existing translation workflows:
 
 ## JSON Format Support
 
@@ -180,9 +182,51 @@ g18n supports both flat and nested JSON formats for maximum compatibility:
 
 Both formats are automatically converted to g18n's efficient trie-based internal storage.
 
+## PO File Support (gettext)
+
+g18n provides comprehensive support for gettext PO files, the industry standard for professional translation workflows:
+
+### PO File Format
+
+```po
+# Translator comment
+#: src/components/Button.gleam:12
+#, no-c-format
+msgid "ui.button.save"
+msgstr "Save"
+
+# Context-sensitive translation
+msgctxt "financial"
+msgid "bank"
+msgstr "Financial Institution"
+
+msgctxt "geographic" 
+msgid "bank"
+msgstr "Riverbank"
+
+# Multiline strings
+msgid "help.text"
+msgstr "This is a long help text that spans "
+"multiple lines in the PO file format. "
+"It supports proper concatenation."
+
+# Parameterized translations
+msgid "user.welcome"
+msgstr "Welcome {name}! You have {count} notifications."
+```
+
+### PO File Features
+
+- **Full gettext compatibility** - Standard PO/POT file format
+- **Context support** - `msgctxt` for disambiguation
+- **Multiline strings** - Automatic continuation handling
+- **Escape sequences** - C-style escapes (`\n`, `\t`, `\"`, `\\`)
+- **Comments** - Translator notes, source references, flags
+- **Professional workflow** - Works with existing translation tools
+
 ## CLI Code Generation
 
-Place JSON files (either format) in `src/<project>/translations/`:
+Place translation files in `src/<project>/translations/` directory:
 
 **en.json:**
 
@@ -214,6 +258,40 @@ gleam run -m g18n generate
 
 ```bash
 gleam run -m g18n generate_nested
+```
+
+### Generate from PO Files (gettext)
+
+Place PO files in `src/<project>/translations/`:
+
+**en.po:**
+
+```po
+msgid "welcome"
+msgstr "Welcome {name}!"
+
+msgid "item.one"
+msgstr "1 item"
+
+msgid "item.other"
+msgstr "{count} items"
+```
+
+**es.po:**
+
+```po
+msgid "welcome" 
+msgstr "¡Bienvenido {name}!"
+
+msgid "item.one"
+msgstr "1 artículo"
+
+msgid "item.other"
+msgstr "{count} artículos"
+```
+
+```bash
+gleam run -m g18n generate_po
 ```
 
 Use generated translations:

@@ -1,5 +1,6 @@
 import argv
 import filepath
+import g18n/internal/po
 import g18n/locale
 import gleam/bool
 import gleam/dict.{type Dict}
@@ -985,6 +986,150 @@ pub fn translations_to_nested_json(translations: Translations) -> String {
   |> json.to_string
 }
 
+/// Create translations from a PO file content string.
+/// 
+/// Parses PO file format and converts entries to the internal trie structure.
+/// Supports msgid/msgstr pairs, contexts (msgctxt), multiline strings,
+/// and standard PO escape sequences.
+/// 
+/// ## Examples
+/// ```gleam
+/// let po_content = "
+/// msgid \"hello\"
+/// msgstr \"Hello\"
+/// 
+/// msgctxt \"greeting\"
+/// msgid \"hello\"
+/// msgstr \"Hi there\"
+/// "
+/// let assert Ok(translations) = g18n.translations_from_po(po_content)
+/// ```
+pub fn translations_from_po(po_content: String) -> Result(Translations, String) {
+  case po.parse_po_content(po_content) {
+    Ok(entries) -> {
+      let translation_dict = po.entries_to_translations(entries)
+      let trie_result =
+        dict.fold(
+          translation_dict,
+          new_translations(),
+          fn(translations, key, value) {
+            let key_parts = string.split(key, ".")
+            Translations(trie.insert(
+              translations.translations,
+              key_parts,
+              value,
+            ))
+          },
+        )
+      Ok(trie_result)
+    }
+    Error(po.InvalidFormat(msg)) -> Error("Invalid PO format: " <> msg)
+    Error(po.UnexpectedEof) -> Error("Unexpected end of file")
+    Error(po.InvalidEscapeSequence(seq)) ->
+      Error("Invalid escape sequence: " <> seq)
+    Error(po.MissingMsgid) -> Error("Missing msgid")
+    Error(po.MissingMsgstr) -> Error("Missing msgstr")
+  }
+}
+
+/// Convert translations to PO file format.
+/// 
+/// Exports the internal trie structure to standard PO file format with
+/// msgid/msgstr pairs. Context translations (those with '@' in the key)
+/// are exported with msgctxt fields.
+/// 
+/// ## Examples
+/// ```gleam
+/// let translations = g18n.new_translations()
+///   |> g18n.add_translation("hello", "Hello")
+///   |> g18n.add_context_translation("hello", "greeting", "Hi there")
+/// let po_content = g18n.translations_to_po(translations)
+/// ```
+pub fn translations_to_po(translations: Translations) -> String {
+  let entries =
+    trie.fold(translations.translations, [], fn(acc, key_parts, value) {
+      let key = string.join(key_parts, ".")
+      case string.split_once(key, "@") {
+        Ok(#(msgid, context)) -> {
+          let entry =
+            po.PoEntry(
+              msgid: msgid,
+              msgstr: value,
+              msgctxt: Some(context),
+              comments: [],
+              references: [],
+              flags: [],
+            )
+          [entry, ..acc]
+        }
+        Error(Nil) -> {
+          let entry =
+            po.PoEntry(
+              msgid: key,
+              msgstr: value,
+              msgctxt: None,
+              comments: [],
+              references: [],
+              flags: [],
+            )
+          [entry, ..acc]
+        }
+      }
+    })
+
+  entries
+  |> list.reverse
+  |> list.map(po_entry_to_string)
+  |> string.join("\n\n")
+}
+
+fn po_entry_to_string(entry: po.PoEntry) -> String {
+  let parts = []
+
+  // Add comments
+  let parts =
+    list.fold(entry.comments, parts, fn(acc, comment) {
+      ["# " <> comment, ..acc]
+    })
+
+  // Add references  
+  let parts =
+    list.fold(entry.references, parts, fn(acc, reference) {
+      ["#: " <> reference, ..acc]
+    })
+
+  // Add flags
+  let parts =
+    list.fold(entry.flags, parts, fn(acc, flag) { ["#, " <> flag, ..acc] })
+
+  // Add msgctxt if present
+  let parts = case entry.msgctxt {
+    Some(context) -> ["msgctxt " <> escape_po_string(context), ..parts]
+    None -> parts
+  }
+
+  // Add msgid and msgstr
+  let parts = [
+    "msgstr " <> escape_po_string(entry.msgstr),
+    "msgid " <> escape_po_string(entry.msgid),
+    ..parts
+  ]
+
+  parts
+  |> list.reverse
+  |> string.join("\n")
+}
+
+fn escape_po_string(input: String) -> String {
+  "\""
+  <> string.replace(input, "\\", "\\\\")
+  |> string.replace("\"", "\\\"")
+  |> string.replace("\n", "\\n")
+  |> string.replace("\t", "\\t")
+  |> string.replace("\r", "\\r")
+  <> "\""
+}
+
 // Helper function to recursively flatten nested dictionary
 fn flatten_json_object(
   dict_obj: Dict(String, Dynamic),
@@ -1116,6 +1261,7 @@ fn json_value_decoder() -> decode.Decoder(json.Json) {
 /// ## Supported Commands
 /// - `generate`: Generate Gleam modules from flat JSON files
 /// - `generate_nested`: Generate Gleam modules from nested JSON files
+/// - `generate_po`: Generate Gleam modules from PO files
 /// - `help`: Display help information
 /// - No arguments: Display help information
 /// 
@@ -1123,7 +1269,8 @@ fn json_value_decoder() -> decode.Decoder(json.Json) {
 /// Run via command line:
 /// ```bash
 /// gleam run generate        # Generate from flat JSON files
-/// gleam run generate_nested # Generate from nested JSON files  
+/// gleam run generate_nested # Generate from nested JSON files
+/// gleam run generate_po     # Generate from PO files
 /// gleam run help           # Show help
 /// gleam run                # Show help (default)
 /// ```
@@ -1131,6 +1278,7 @@ pub fn main() {
   case argv.load().arguments {
     ["generate"] -> generate_command()
     ["generate_nested"] -> generate_nested_command()
+    ["generate_po"] -> generate_po_command()
     ["help"] -> help_command()
     [] -> help_command()
     _ -> {
@@ -1159,6 +1307,16 @@ fn generate_nested_command() {
   }
 }
 
+fn generate_po_command() {
+  case generate_po_translations() {
+    Ok(path) -> {
+      io.println("🌏Generated translation modules from PO files")
+      io.println("  " <> path)
+    }
+    Error(msg) -> io.println(snag.pretty_print(msg))
+  }
+}
+
 fn help_command() {
   io.println("g18n CLI - Internationalization for Gleam")
   io.println("")
@@ -1167,6 +1325,7 @@ fn help_command() {
   io.println(
     "  generate_nested  Generate Gleam module from nested JSON files (industry standard)",
   )
+  io.println("  generate_po      Generate Gleam module from PO files (gettext)")
   io.println("  help             Show this help message")
   io.println("")
   io.println("Flat JSON usage:")
@@ -1185,11 +1344,17 @@ fn help_command() {
     "  Run 'gleam run generate_nested' to create the translations module",
   )
   io.println("")
+  io.println("PO files usage:")
+  io.println("  Place PO files in src/<project>/translations/")
+  io.println("  Example: msgid \"ui.button.save\" / msgstr \"Save\"")
+  io.println("  Run 'gleam run generate_po' to create the translations module")
+  io.println("")
   io.println("Supported formats:")
   io.println("  ✅ Flat JSON (g18n optimized)")
   io.println(
     "  ✅ Nested JSON (react-i18next, Vue i18n, Angular i18n compatible)",
   )
+  io.println("  ✅ PO files (gettext standard) - msgid/msgstr pairs")
   io.println("")
 }
 
@@ -1213,6 +1378,14 @@ fn generate_nested_translations() -> SnagResult(String) {
     project_name,
     locale_files,
   ))
+  use _ <- result.try(format())
+  Ok(output_path)
+}
+
+fn generate_po_translations() -> SnagResult(String) {
+  use project_name <- result.try(get_project_name())
+  use locale_files <- result.try(find_po_files(project_name))
+  use output_path <- result.try(write_module_from_po(project_name, locale_files))
   use _ <- result.try(format())
   Ok(output_path)
 }
@@ -1304,6 +1477,49 @@ fn find_locale_files(
   }
 }
 
+fn find_po_files(project_name: String) -> SnagResult(List(#(String, String))) {
+  let root = find_root(".")
+  let translations_dir =
+    filepath.join(root, "src")
+    |> filepath.join(project_name)
+    |> filepath.join("translations")
+
+  case simplifile.read_directory(translations_dir) {
+    Ok(files) -> {
+      let locale_files =
+        files
+        |> list.filter(fn(file) { string.ends_with(file, ".po") })
+        |> list.try_map(fn(file) {
+          let locale_code = string.drop_end(file, 3)
+          let file_path = filepath.join(translations_dir, file)
+          let locale_code = string.replace(locale_code, each: "-", with: "_")
+          use <- bool.guard(
+            string.length(locale_code) != 2 && string.length(locale_code) != 5,
+            snag.error(
+              "Locale code must be 2 or 5 characters (e.g., 'en' or 'en-US'): "
+              <> locale_code,
+            ),
+          )
+          Ok(#(locale_code, file_path))
+        })
+        |> snag.context("Error processing PO files")
+
+      case locale_files {
+        Ok([]) ->
+          snag.error(
+            "No PO files found in "
+            <> translations_dir
+            <> "\nLooking for files like en.po, es.po, pt.po, etc.",
+          )
+        Ok(files) -> Ok(files)
+        Error(msg) -> Error(msg)
+      }
+    }
+    Error(_) ->
+      snag.error("Could not read translations directory: " <> translations_dir)
+  }
+}
+
 fn write_module(
   project_name: String,
   locale_files: List(#(String, String)),
@@ -1381,6 +1597,45 @@ fn load_all_locales_from_nested(
   })
   |> result.map(list.reverse)
   |> snag.context("Error loading nested JSON locale files")
+}
+
+fn load_all_locales_from_po(
+  locale_files: List(#(String, String)),
+) -> SnagResult(List(#(String, Translations))) {
+  list_fold_result(locale_files, [], fn(acc, locale_file) {
+    let #(locale_code, file_path) = locale_file
+    use content <- result.try(
+      simplifile.read(file_path)
+      |> snag.map_error(fn(_) { "Could not read " <> file_path }),
+    )
+    use translations <- result.try(
+      translations_from_po(content)
+      |> snag.map_error(fn(e) {
+        "Could not parse PO file in " <> file_path <> ": " <> e
+      }),
+    )
+    Ok([#(locale_code, translations), ..acc])
+  })
+  |> result.map(list.reverse)
+  |> snag.context("Error loading PO locale files")
+}
+
+fn write_module_from_po(
+  project_name: String,
+  locale_files: List(#(String, String)),
+) -> SnagResult(String) {
+  use locale_data <- result.try(load_all_locales_from_po(locale_files))
+  let output_path =
+    filepath.join("src", project_name)
+    |> filepath.join("translations.gleam")
+
+  let module_content = generate_module_content(locale_data)
+
+  simplifile.write(output_path, module_content)
+  |> snag.map_error(fn(_) {
+    "Could not write translations module from PO files at: " <> output_path
+  })
+  |> result.map(fn(_) { output_path })
 }
 
 fn generate_module_content(locale_data: List(#(String, Translations))) -> String {
