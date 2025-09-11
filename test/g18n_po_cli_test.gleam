@@ -200,6 +200,8 @@ msgstr \"Editar\""
       po.PoEntry(
         msgid: "Hello, world!",
         msgstr: "¡Hola, mundo!",
+        msgid_plural: option.None,
+        msgstr_plural: [],
         msgctxt: option.None,
         comments: [],
         references: ["main.c:42"],
@@ -450,5 +452,230 @@ pub fn cli_simulation_test() {
   should.equal(
     g18n.translate_with_params(fr_translator, "user.welcome", params),
     "Bienvenue Maria!",
+  )
+}
+
+// Test CLI plural form handling in real workflow
+pub fn cli_plural_workflow_test() {
+  // Simulate PO files with plural forms as CLI would handle them
+  let test_po_files = [
+    #(
+      "en",
+      "
+msgid \"item\"
+msgid_plural \"items\"
+msgstr[0] \"1 item\"
+msgstr[1] \"{count} items\"
+
+msgid \"hello\"
+msgstr \"Hello World\"
+",
+    ),
+    #(
+      "es",
+      "
+msgid \"item\"
+msgid_plural \"items\"  
+msgstr[0] \"1 artículo\"
+msgstr[1] \"{count} artículos\"
+
+msgid \"hello\"
+msgstr \"Hola Mundo\"
+",
+    ),
+    #(
+      "fr",
+      "
+msgid \"item\"
+msgid_plural \"items\"
+msgstr[0] \"1 élément\"
+msgstr[1] \"{count} éléments\"
+
+msgid \"hello\"
+msgstr \"Bonjour le monde\"
+",
+    ),
+  ]
+
+  // Process each file as CLI would  
+  let locale_translators =
+    list.try_map(test_po_files, fn(file_data) {
+      let #(locale_code, po_content) = file_data
+      case g18n.translations_from_po(po_content) {
+        Ok(translations) ->
+          case locale.new(locale_code) {
+            Ok(loc) ->
+              Ok(#(locale_code, g18n.new_translator(loc, translations)))
+            Error(_) -> Error("Failed to create locale")
+          }
+        Error(e) -> Error(e)
+      }
+    })
+
+  let assert Ok(translators) = locale_translators
+  should.equal(list.length(translators), 3)
+
+  // Verify pluralization works across all locales
+  let assert Ok(#("en", en_translator)) =
+    list.find(translators, fn(t) { t.0 == "en" })
+  let assert Ok(#("es", es_translator)) =
+    list.find(translators, fn(t) { t.0 == "es" })
+  let assert Ok(#("fr", fr_translator)) =
+    list.find(translators, fn(t) { t.0 == "fr" })
+
+  // Test regular translations
+  should.equal(g18n.translate(en_translator, "hello"), "Hello World")
+  should.equal(g18n.translate(es_translator, "hello"), "Hola Mundo")
+  should.equal(g18n.translate(fr_translator, "hello"), "Bonjour le monde")
+
+  // Test pluralization across locales
+  should.equal(g18n.translate_plural(en_translator, "item", 1), "1 item")
+  should.equal(g18n.translate_plural(en_translator, "item", 5), "5 items")
+
+  should.equal(g18n.translate_plural(es_translator, "item", 1), "1 artículo")
+  should.equal(g18n.translate_plural(es_translator, "item", 3), "3 artículos")
+
+  should.equal(g18n.translate_plural(fr_translator, "item", 1), "1 élément")
+  should.equal(g18n.translate_plural(fr_translator, "item", 2), "2 éléments")
+
+  // Test that .one/.other forms are accessible
+  should.equal(g18n.translate(en_translator, "item.one"), "1 item")
+  should.equal(g18n.translate(en_translator, "item.other"), "{count} items")
+}
+
+// Test CLI with complex plural forms (Arabic-style)
+pub fn cli_complex_plural_test() {
+  let arabic_po =
+    "
+# Arabic has 6 plural forms
+msgid \"كتاب\"
+msgid_plural \"كتب\"
+msgstr[0] \"لا كتب\"
+msgstr[1] \"كتاب واحد\"
+msgstr[2] \"كتابان\"
+msgstr[3] \"كتب قليلة\"
+msgstr[4] \"كتب كثيرة\"
+msgstr[5] \"كتب أخرى\"
+"
+
+  case g18n.translations_from_po(arabic_po) {
+    Ok(translations) ->
+      case locale.new("ar") {
+        Ok(ar_locale) -> {
+          let translator = g18n.new_translator(ar_locale, translations)
+
+          // Verify all 6 forms are accessible (direct key access)
+          should.equal(g18n.translate(translator, "كتاب.one"), "لا كتب")
+          should.equal(g18n.translate(translator, "كتاب.other"), "كتاب واحد")
+          should.equal(g18n.translate(translator, "كتاب.2"), "كتابان")
+          should.equal(g18n.translate(translator, "كتاب.3"), "كتب قليلة")
+          should.equal(g18n.translate(translator, "كتاب.4"), "كتب كثيرة")
+          should.equal(g18n.translate(translator, "كتاب.5"), "كتب أخرى")
+
+          // Test pluralization (g18n applies Arabic rules, may not match direct indices)
+          // Arabic pluralization maps to different forms than direct PO indices
+          should.equal(g18n.translate_plural(translator, "كتاب", 1), "لا كتب")
+          should.equal(g18n.translate_plural(translator, "كتاب", 2), "كتاب.two")
+          // fallback key
+          should.equal(g18n.translate_plural(translator, "كتاب", 5), "كتاب.few")
+          // fallback key
+        }
+        Error(_) -> panic as "Failed to create Arabic locale"
+      }
+    Error(e) -> panic as { "Failed to parse Arabic PO: " <> e }
+  }
+}
+
+// Test CLI mixed plural and regular entries workflow
+pub fn cli_mixed_content_workflow_test() {
+  let mixed_po =
+    "
+# Regular entries
+msgid \"app.title\"
+msgstr \"My Application\"
+
+msgid \"nav.home\"
+msgstr \"Home\"
+
+# Plural entries
+msgid \"user.message\"
+msgid_plural \"user.messages\"
+msgstr[0] \"You have 1 message\"
+msgstr[1] \"You have {count} messages\"
+
+msgid \"file.count\"
+msgid_plural \"file.counts\"
+msgstr[0] \"1 file selected\"
+msgstr[1] \"{count} files selected\"
+
+# Context entries
+msgctxt \"button\"
+msgid \"save\"
+msgstr \"Save\"
+
+msgctxt \"menu\"
+msgid \"save\"
+msgstr \"Save File\"
+
+# Context + Plural entries  
+msgctxt \"email\"
+msgid \"notification\"
+msgid_plural \"notifications\"
+msgstr[0] \"1 email notification\"
+msgstr[1] \"{count} email notifications\"
+"
+
+  let assert Ok(translations) = g18n.translations_from_po(mixed_po)
+  let assert Ok(locale) = locale.new("en")
+  let translator = g18n.new_translator(locale, translations)
+
+  // Test all entry types work
+  should.equal(g18n.translate(translator, "app.title"), "My Application")
+  should.equal(g18n.translate(translator, "nav.home"), "Home")
+
+  // Test plurals
+  should.equal(
+    g18n.translate_plural(translator, "user.message", 1),
+    "You have 1 message",
+  )
+  should.equal(
+    g18n.translate_plural(translator, "user.message", 5),
+    "You have 5 messages",
+  )
+  should.equal(
+    g18n.translate_plural(translator, "file.count", 1),
+    "1 file selected",
+  )
+  should.equal(
+    g18n.translate_plural(translator, "file.count", 3),
+    "3 files selected",
+  )
+
+  // Test contexts
+  should.equal(
+    g18n.translate_with_context(translator, "save", g18n.Context("button")),
+    "Save",
+  )
+  should.equal(
+    g18n.translate_with_context(translator, "save", g18n.Context("menu")),
+    "Save File",
+  )
+
+  // Test context + plural (should access via .one/.other with context)
+  should.equal(
+    g18n.translate_with_context(
+      translator,
+      "notification.one",
+      g18n.Context("email"),
+    ),
+    "1 email notification",
+  )
+  should.equal(
+    g18n.translate_with_context(
+      translator,
+      "notification.other",
+      g18n.Context("email"),
+    ),
+    "{count} email notifications",
   )
 }

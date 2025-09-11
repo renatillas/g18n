@@ -17,7 +17,7 @@ A comprehensive internationalization library for Gleam with multi-language suppo
 - 🔤 **Hierarchical Translations** - Efficient trie-based storage with namespace support
 - ⏰ **Relative Time** - "2 hours ago", "hace 3 días", "2時間前" in all languages
 - ✅ **Translation Validation** - Built-in completeness checking and coverage reports
-- 🛠️ **CLI Code Generation** - Auto-generate type-safe modules from JSON files
+- 🛠️ **CLI Code Generation** - Auto-generate type-safe modules from JSON/PO files (via separate g18n-dev package)
 
 ## Installation
 
@@ -226,6 +226,12 @@ msgstr "Welcome {name}! You have {count} notifications."
 
 ## CLI Code Generation
 
+**Note: CLI functionality has been moved to the separate [g18n-dev](https://hex.pm/packages/g18n-dev) package to keep the core g18n library browser-compatible. Install g18n-dev as a dev dependency for code generation.**
+
+```sh
+gleam add --dev g18n-dev
+```
+
 Place translation files in `src/<project>/translations/` directory:
 
 **en.json:**
@@ -251,13 +257,13 @@ Place translation files in `src/<project>/translations/` directory:
 ### Generate from Flat JSON (g18n optimized)
 
 ```bash
-gleam run -m g18n generate
+gleam run -m g18n/dev generate
 ```
 
 ### Generate from Nested JSON (industry standard)
 
 ```bash
-gleam run -m g18n generate_nested
+gleam run -m g18n/dev generate --nested
 ```
 
 ### Generate from PO Files (gettext)
@@ -291,7 +297,7 @@ msgstr "{count} artículos"
 ```
 
 ```bash
-gleam run -m g18n generate_po
+gleam run -m g18n/dev generate --po
 ```
 
 Use generated translations:
@@ -334,15 +340,16 @@ g18n.format_relative_time(translator, g18n.Hours(2), g18n.Past)
 
 - **Translation validation**: Check completeness across locales
 - **Coverage reports**: Track translation progress  
-- **JSON → Gleam**: Auto-generate type-safe translation modules
+- **JSON/PO → Gleam**: Auto-generate type-safe translation modules (via g18n-dev package)
 - **Namespace queries**: Efficiently find related translations
 
 ## Development
 
 ```sh
-gleam add g18n        # Install
-gleam test           # Run tests (20 comprehensive tests)  
-gleam run generate   # Generate translation modules
+gleam add g18n                  # Install core library
+gleam add --dev g18n_dev        # Install CLI tools
+gleam test                      # Run tests (115 comprehensive tests)  
+gleam run -m g18n/dev generate  # Generate translation modules
 ```
 
 See function documentation for detailed API examples and usage patterns.

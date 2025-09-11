@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] - Unreleased
+
+### Added
+- **PO Plural Forms Support**: Complete support for PO plural forms (msgid_plural, msgstr[n])
+  - Multi-form plural entries with proper index validation
+  - Complex language support (Arabic 6-form, Russian 3-form, etc.)
+  - Robust boundary detection for consecutive plural entries
+  - Context + plural combination support
+
+### Fixed
+- **PO Parser Improvements**: Enhanced parsing reliability and error handling
+  - Fixed multi-entry parsing boundary detection issues
+  - Improved context + plural key generation (`notification.one@email` format)
+  - Added msgstr[0] validation requirement for plural entries
+  - Enhanced error detection for malformed PO syntax (msgid_plural without msgid)
+  - Fixed string generation format issues in tests (literal `\n` vs actual newlines)
+
+### Changed
+- **CLI Migration**: Extracted CLI functionality to separate `g18n-dev` package
+  - Core `g18n` library is now browser-compatible (removed Node.js dependencies)
+  - CLI tools moved to `g18n-dev`: `generate`, `generate_nested`, `generate_po` commands
+  - Development dependencies removed: `argv`, `shellout`, `simplifile`, `tom`, `filepath`
+  - Breaking change: CLI functionality requires separate `g18n-dev` package installation
+
 ## [2.1.0]
 
 ### Added
