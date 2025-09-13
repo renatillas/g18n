@@ -9,6 +9,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/regexp
+import gleam/result
 import gleam/string
 import gleam/time/calendar
 import gleam_community/maths
@@ -3486,4 +3487,279 @@ fn has_prefix(key_parts: List(String), prefix_parts: List(String)) -> Bool {
 @internal
 pub fn extract_trie(translations: Translations) -> trie.Trie(String, String) {
   translations.translations
+}
+
+/// Statistics about translation completeness between locales
+pub type TranslationStats {
+  TranslationStats(
+    /// Total number of locales analyzed
+    total_locales: Int,
+    /// Reference locale used for comparison
+    primary_locale: String,
+    /// Total number of keys in primary locale
+    total_keys: Int,
+    /// Statistics for each locale
+    locale_stats: List(LocaleStats),
+  )
+}
+
+/// Statistics for a specific locale
+pub type LocaleStats {
+  LocaleStats(
+    /// Locale code
+    locale: String,
+    /// Number of translated keys
+    translated_keys: Int,
+    /// Coverage percentage (0.0 to 100.0)
+    coverage: Float,
+    /// Missing keys from primary locale
+    missing_keys: List(String),
+    /// Keys by namespace/prefix
+    namespace_counts: List(#(String, Int)),
+  )
+}
+
+/// Results of comparing two translation sets
+pub type TranslationDiff {
+  TranslationDiff(
+    /// Source locale
+    from_locale: String,
+    /// Target locale
+    to_locale: String,
+    /// Keys missing in target locale
+    missing_in_target: List(String),
+    /// Extra keys in target locale
+    extra_in_target: List(String),
+    /// Keys present in both locales
+    common_keys: List(String),
+  )
+}
+
+/// Results of linting translations
+pub type LintResults {
+  LintResults(
+    /// Total number of issues found
+    total_issues: Int,
+    /// Issues by locale
+    locale_issues: List(LocaleLintIssues),
+  )
+}
+
+/// Lint issues for a specific locale
+pub type LocaleLintIssues {
+  LocaleLintIssues(
+    /// Locale code
+    locale: String,
+    /// List of issues found
+    issues: List(LintIssue),
+  )
+}
+
+/// Types of lint issues
+pub type LintIssue {
+  EmptyTranslationLint(key: String)
+  LongTranslation(key: String, length: Int)
+  DuplicateTranslation(key: String, duplicate_of: String)
+}
+
+/// Generate comprehensive statistics for translation project
+/// 
+/// ## Examples
+/// ```gleam
+/// let stats = g18n.get_translation_stats(locale_data, "en")
+/// io.println("Total locales: " <> string.inspect(stats.total_locales))
+/// io.println("Total keys: " <> string.inspect(stats.total_keys))
+/// ```
+pub fn get_translation_stats(
+  locale_data: List(#(String, Translations)),
+  primary_locale: String,
+) -> Result(TranslationStats, String) {
+  case list.find(locale_data, fn(pair) { pair.0 == primary_locale }) {
+    Ok(#(_, primary_translations)) -> {
+      let total_keys = list.length(get_all_translation_keys(primary_translations))
+      
+      let locale_stats =
+        list.map(locale_data, fn(pair) {
+          let #(locale_code, translations) = pair
+          let keys = get_all_translation_keys(translations)
+          let translated_keys = list.length(keys)
+          let coverage = case total_keys {
+            0 -> 0.0
+            _ -> int.to_float(translated_keys) /. int.to_float(total_keys) *. 100.0
+          }
+          
+          // Find missing keys
+          let primary_keys = get_all_translation_keys(primary_translations)
+          let missing_keys = list.filter(primary_keys, fn(key) {
+            !list.contains(keys, key)
+          })
+          
+          // Group by namespace
+          let namespace_counts = get_namespace_counts(keys)
+          
+          LocaleStats(
+            locale: locale_code,
+            translated_keys: translated_keys,
+            coverage: coverage,
+            missing_keys: missing_keys,
+            namespace_counts: namespace_counts,
+          )
+        })
+      
+      Ok(TranslationStats(
+        total_locales: list.length(locale_data),
+        primary_locale: primary_locale,
+        total_keys: total_keys,
+        locale_stats: locale_stats,
+      ))
+    }
+    Error(_) -> Error("Primary locale not found: " <> primary_locale)
+  }
+}
+
+/// Compare two translation sets and return differences
+/// 
+/// ## Examples
+/// ```gleam
+/// let diff = g18n.diff_translations(en_translations, es_translations, "en", "es")
+/// io.println("Missing keys: " <> string.inspect(list.length(diff.missing_in_target)))
+/// ```
+pub fn diff_translations(
+  from_translations: Translations,
+  to_translations: Translations,
+  from_locale: String,
+  to_locale: String,
+) -> TranslationDiff {
+  let from_keys = get_all_translation_keys(from_translations)
+  let to_keys = get_all_translation_keys(to_translations)
+  
+  let missing_in_target = list.filter(from_keys, fn(key) {
+    !list.contains(to_keys, key)
+  })
+  
+  let extra_in_target = list.filter(to_keys, fn(key) {
+    !list.contains(from_keys, key)
+  })
+  
+  let common_keys = list.filter(from_keys, fn(key) {
+    list.contains(to_keys, key)
+  })
+  
+  TranslationDiff(
+    from_locale: from_locale,
+    to_locale: to_locale,
+    missing_in_target: missing_in_target,
+    extra_in_target: extra_in_target,
+    common_keys: common_keys,
+  )
+}
+
+/// Lint translations for common issues
+/// 
+/// ## Examples
+/// ```gleam
+/// let results = g18n.lint_translations(locale_data, ["empty", "long"])
+/// io.println("Total issues: " <> string.inspect(results.total_issues))
+/// ```
+pub fn lint_translations(
+  locale_data: List(#(String, Translations)),
+  rules: List(String),
+) -> LintResults {
+  let active_rules = case rules {
+    [] -> ["empty", "long"]
+    _ -> rules
+  }
+  
+  let locale_issues = list.map(locale_data, fn(pair) {
+    let #(locale_code, translations) = pair
+    let issues = check_translation_lint_rules(translations, active_rules)
+    
+    LocaleLintIssues(
+      locale: locale_code,
+      issues: issues,
+    )
+  })
+  
+  let total_issues = list.fold(locale_issues, 0, fn(acc, locale_issue) {
+    acc + list.length(locale_issue.issues)
+  })
+  
+  LintResults(
+    total_issues: total_issues,
+    locale_issues: locale_issues,
+  )
+}
+
+/// Get missing keys that need to be synced from source to target
+/// 
+/// ## Examples
+/// ```gleam
+/// let missing = g18n.get_missing_keys(en_translations, es_translations)
+/// io.println("Missing keys: " <> string.inspect(list.length(missing)))
+/// ```
+pub fn get_missing_keys(
+  source_translations: Translations,
+  target_translations: Translations,
+) -> List(String) {
+  let source_keys = get_all_translation_keys(source_translations)
+  let target_keys = get_all_translation_keys(target_translations)
+  
+  list.filter(source_keys, fn(key) {
+    !list.contains(target_keys, key)
+  })
+}
+
+// Helper functions
+
+fn get_namespace_counts(keys: List(String)) -> List(#(String, Int)) {
+  list.fold(keys, dict.new(), fn(acc, key) {
+    case string.split(key, ".") {
+      [prefix, ..] -> {
+        let count = dict.get(acc, prefix) |> result.unwrap(0)
+        dict.insert(acc, prefix, count + 1)
+      }
+      [] -> acc
+    }
+  })
+  |> dict.to_list()
+  |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+}
+
+fn check_translation_lint_rules(
+  translations: Translations,
+  rules: List(String),
+) -> List(LintIssue) {
+  let translation_pairs = trie.fold(
+    translations |> extract_trie,
+    [],
+    fn(acc, key_parts, value) {
+      let key = string.join(key_parts, ".")
+      [#(key, value), ..acc]
+    },
+  )
+  
+  list.fold(rules, [], fn(acc, rule) {
+    case rule {
+      "empty" -> {
+        let empty_issues = list.filter_map(translation_pairs, fn(pair) {
+          case string.trim(pair.1) {
+            "" -> Ok(EmptyTranslationLint(pair.0))
+            _ -> Error(Nil)
+          }
+        })
+        list.append(acc, empty_issues)
+      }
+      "long" -> {
+        let long_issues = list.filter_map(translation_pairs, fn(pair) {
+          let len = string.length(pair.1)
+          case len > 200 {
+            True -> Ok(LongTranslation(pair.0, len))
+            False -> Error(Nil)
+          }
+        })
+        list.append(acc, long_issues)
+      }
+      _ -> acc
+    }
+  })
 }

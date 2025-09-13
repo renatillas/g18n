@@ -2,9 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.0.0] - Unreleased
+## [3.1.0] - 2024-09-13
 
 ### Added
+
+- **Enhanced development tool support**: New functions to support g18n-dev CLI tools
+  - `get_translation_stats()` - Generate comprehensive statistics for translation coverage analysis
+  - `lint_translations()` - Quality checks for translation files with configurable rules
+  - `diff_translations()` - Compare translations between locales to identify differences
+  - `get_missing_keys()` - Find keys present in source locale but missing in target locale
+  - `extract_trie()` - Access internal trie structure for advanced key analysis (development use)
+
+### Enhanced
+
+- **Developer experience**: Core functions now provide rich data structures for tooling integration
+- **Statistics and analytics**: Detailed translation coverage metrics with locale-specific breakdowns
+- **Quality assurance**: Built-in linting capabilities for common translation issues
+- **Comparison utilities**: Comprehensive diff functionality for locale synchronization
+
+## [3.0.0] - 2024-09-11
+
+### Added
+
 - **PO Plural Forms Support**: Complete support for PO plural forms (msgid_plural, msgstr[n])
   - Multi-form plural entries with proper index validation
   - Complex language support (Arabic 6-form, Russian 3-form, etc.)
@@ -12,6 +31,7 @@ All notable changes to this project will be documented in this file.
   - Context + plural combination support
 
 ### Fixed
+
 - **PO Parser Improvements**: Enhanced parsing reliability and error handling
   - Fixed multi-entry parsing boundary detection issues
   - Improved context + plural key generation (`notification.one@email` format)
@@ -20,6 +40,7 @@ All notable changes to this project will be documented in this file.
   - Fixed string generation format issues in tests (literal `\n` vs actual newlines)
 
 ### Changed
+
 - **CLI Migration**: Extracted CLI functionality to separate `g18n-dev` package
   - Core `g18n` library is now browser-compatible (removed Node.js dependencies)
   - CLI tools moved to `g18n-dev`: `generate`, `generate_nested`, `generate_po` commands
