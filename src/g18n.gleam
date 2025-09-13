@@ -3576,8 +3576,9 @@ pub fn get_translation_stats(
 ) -> Result(TranslationStats, String) {
   case list.find(locale_data, fn(pair) { pair.0 == primary_locale }) {
     Ok(#(_, primary_translations)) -> {
-      let total_keys = list.length(get_all_translation_keys(primary_translations))
-      
+      let total_keys =
+        list.length(get_all_translation_keys(primary_translations))
+
       let locale_stats =
         list.map(locale_data, fn(pair) {
           let #(locale_code, translations) = pair
@@ -3585,18 +3586,18 @@ pub fn get_translation_stats(
           let translated_keys = list.length(keys)
           let coverage = case total_keys {
             0 -> 0.0
-            _ -> int.to_float(translated_keys) /. int.to_float(total_keys) *. 100.0
+            _ ->
+              int.to_float(translated_keys) /. int.to_float(total_keys) *. 100.0
           }
-          
+
           // Find missing keys
           let primary_keys = get_all_translation_keys(primary_translations)
-          let missing_keys = list.filter(primary_keys, fn(key) {
-            !list.contains(keys, key)
-          })
-          
+          let missing_keys =
+            list.filter(primary_keys, fn(key) { !list.contains(keys, key) })
+
           // Group by namespace
           let namespace_counts = get_namespace_counts(keys)
-          
+
           LocaleStats(
             locale: locale_code,
             translated_keys: translated_keys,
@@ -3605,7 +3606,7 @@ pub fn get_translation_stats(
             namespace_counts: namespace_counts,
           )
         })
-      
+
       Ok(TranslationStats(
         total_locales: list.length(locale_data),
         primary_locale: primary_locale,
@@ -3632,19 +3633,16 @@ pub fn diff_translations(
 ) -> TranslationDiff {
   let from_keys = get_all_translation_keys(from_translations)
   let to_keys = get_all_translation_keys(to_translations)
-  
-  let missing_in_target = list.filter(from_keys, fn(key) {
-    !list.contains(to_keys, key)
-  })
-  
-  let extra_in_target = list.filter(to_keys, fn(key) {
-    !list.contains(from_keys, key)
-  })
-  
-  let common_keys = list.filter(from_keys, fn(key) {
-    list.contains(to_keys, key)
-  })
-  
+
+  let missing_in_target =
+    list.filter(from_keys, fn(key) { !list.contains(to_keys, key) })
+
+  let extra_in_target =
+    list.filter(to_keys, fn(key) { !list.contains(from_keys, key) })
+
+  let common_keys =
+    list.filter(from_keys, fn(key) { list.contains(to_keys, key) })
+
   TranslationDiff(
     from_locale: from_locale,
     to_locale: to_locale,
@@ -3669,25 +3667,21 @@ pub fn lint_translations(
     [] -> ["empty", "long"]
     _ -> rules
   }
-  
-  let locale_issues = list.map(locale_data, fn(pair) {
-    let #(locale_code, translations) = pair
-    let issues = check_translation_lint_rules(translations, active_rules)
-    
-    LocaleLintIssues(
-      locale: locale_code,
-      issues: issues,
-    )
-  })
-  
-  let total_issues = list.fold(locale_issues, 0, fn(acc, locale_issue) {
-    acc + list.length(locale_issue.issues)
-  })
-  
-  LintResults(
-    total_issues: total_issues,
-    locale_issues: locale_issues,
-  )
+
+  let locale_issues =
+    list.map(locale_data, fn(pair) {
+      let #(locale_code, translations) = pair
+      let issues = check_translation_lint_rules(translations, active_rules)
+
+      LocaleLintIssues(locale: locale_code, issues: issues)
+    })
+
+  let total_issues =
+    list.fold(locale_issues, 0, fn(acc, locale_issue) {
+      acc + list.length(locale_issue.issues)
+    })
+
+  LintResults(total_issues: total_issues, locale_issues: locale_issues)
 }
 
 /// Get missing keys that need to be synced from source to target
@@ -3703,10 +3697,8 @@ pub fn get_missing_keys(
 ) -> List(String) {
   let source_keys = get_all_translation_keys(source_translations)
   let target_keys = get_all_translation_keys(target_translations)
-  
-  list.filter(source_keys, fn(key) {
-    !list.contains(target_keys, key)
-  })
+
+  list.filter(source_keys, fn(key) { !list.contains(target_keys, key) })
 }
 
 // Helper functions
@@ -3729,34 +3721,33 @@ fn check_translation_lint_rules(
   translations: Translations,
   rules: List(String),
 ) -> List(LintIssue) {
-  let translation_pairs = trie.fold(
-    translations |> extract_trie,
-    [],
-    fn(acc, key_parts, value) {
+  let translation_pairs =
+    trie.fold(translations |> extract_trie, [], fn(acc, key_parts, value) {
       let key = string.join(key_parts, ".")
       [#(key, value), ..acc]
-    },
-  )
-  
+    })
+
   list.fold(rules, [], fn(acc, rule) {
     case rule {
       "empty" -> {
-        let empty_issues = list.filter_map(translation_pairs, fn(pair) {
-          case string.trim(pair.1) {
-            "" -> Ok(EmptyTranslationLint(pair.0))
-            _ -> Error(Nil)
-          }
-        })
+        let empty_issues =
+          list.filter_map(translation_pairs, fn(pair) {
+            case string.trim(pair.1) {
+              "" -> Ok(EmptyTranslationLint(pair.0))
+              _ -> Error(Nil)
+            }
+          })
         list.append(acc, empty_issues)
       }
       "long" -> {
-        let long_issues = list.filter_map(translation_pairs, fn(pair) {
-          let len = string.length(pair.1)
-          case len > 200 {
-            True -> Ok(LongTranslation(pair.0, len))
-            False -> Error(Nil)
-          }
-        })
+        let long_issues =
+          list.filter_map(translation_pairs, fn(pair) {
+            let len = string.length(pair.1)
+            case len > 200 {
+              True -> Ok(LongTranslation(pair.0, len))
+              False -> Error(Nil)
+            }
+          })
         list.append(acc, long_issues)
       }
       _ -> acc
