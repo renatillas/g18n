@@ -100,6 +100,28 @@ pub fn ordinal_test() {
     == "11th place"
   assert g18n.translate_ordinal_with_params(translator, "place", 21, params)
     == "21st place"
+
+  // Swedish: :a for 1st/2nd (except 11/12), :e for everything else
+  let assert Ok(sv_locale) = locale.new("sv")
+  let sv_translations =
+    g18n.new_translations()
+    |> g18n.add_translation("place.first", "{ordinal} plats")
+    |> g18n.add_translation("place.second", "{ordinal} plats")
+    |> g18n.add_translation("place.nth", "{ordinal} plats")
+  let sv_translator = g18n.new_translator(sv_locale, sv_translations)
+
+  assert g18n.translate_ordinal_with_params(sv_translator, "place", 1, params)
+    == "1:a plats"
+  assert g18n.translate_ordinal_with_params(sv_translator, "place", 2, params)
+    == "2:a plats"
+  assert g18n.translate_ordinal_with_params(sv_translator, "place", 3, params)
+    == "3:e plats"
+  assert g18n.translate_ordinal_with_params(sv_translator, "place", 11, params)
+    == "11:e plats"
+  assert g18n.translate_ordinal_with_params(sv_translator, "place", 12, params)
+    == "12:e plats"
+  assert g18n.translate_ordinal_with_params(sv_translator, "place", 21, params)
+    == "21:a plats"
 }
 
 pub fn context_sensitive_translation_test() {

@@ -83,6 +83,7 @@ pub fn locale_plural_rule(locale: Locale) -> PluralRules {
     Locale("ja", _) -> japanese_plural_rule
     Locale("ko", _) -> korean_plural_rule
     Locale("hi", _) -> hindi_plural_rule
+    Locale("sv", _) -> swedish_plural_rule
     _ -> english_plural_rule
     // Fallback to English for unsupported languages
   }
@@ -92,6 +93,7 @@ pub fn locale_plural_rule(locale: Locale) -> PluralRules {
 pub fn ordinal_rule(locale: Locale, position: Int) -> OrdinalRule {
   case locale {
     Locale("en", _) -> english_ordinal_rule(position)
+    Locale("sv", _) -> swedish_ordinal_rule(position)
     _ -> english_ordinal_rule(position)
   }
 }
@@ -126,6 +128,7 @@ pub fn ordinal_key(base_key: String, ordinal_rule: OrdinalRule) -> String {
 pub fn ordinal_suffix(locale: Locale, position: Int) -> String {
   case locale {
     Locale("en", _) -> english_ordinal_suffix(position)
+    Locale("sv", _) -> swedish_ordinal_suffix(position)
     _ -> int.to_string(position)
   }
 }
@@ -143,6 +146,19 @@ fn english_ordinal_suffix(position: Int) -> String {
         3 -> "rd"
         _ -> "th"
       }
+  }
+
+  int.to_string(position) <> suffix
+}
+
+fn swedish_ordinal_suffix(position: Int) -> String {
+  let mod_10 = position % 10
+  let mod_100 = position % 100
+
+  let suffix = case mod_10, mod_100 {
+    1, n if n != 11 -> ":a"
+    2, n if n != 12 -> ":a"
+    _, _ -> ":e"
   }
 
   int.to_string(position) <> suffix
@@ -246,6 +262,24 @@ fn hindi_plural_rule(count: Int) -> PluralRule {
   case count {
     0 | 1 -> One
     _ -> Other
+  }
+}
+
+fn swedish_plural_rule(count: Int) -> PluralRule {
+  case count {
+    1 -> One
+    _ -> Other
+  }
+}
+
+fn swedish_ordinal_rule(position: Int) -> OrdinalRule {
+  let mod_10 = position % 10
+  let mod_100 = position % 100
+
+  case mod_10, mod_100 {
+    1, n if n != 11 -> First
+    2, n if n != 12 -> Second
+    _, _ -> Nth
   }
 }
 

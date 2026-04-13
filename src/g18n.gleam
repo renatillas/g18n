@@ -759,6 +759,7 @@ fn validate_single_plural_form(
     "en" -> ["one", "other"]
     "pt" -> ["zero", "one", "other"]
     "ru" -> ["one", "few", "many"]
+    "sv" -> ["one", "other"]
     _ -> ["one", "other"]
   }
 
@@ -2083,6 +2084,8 @@ pub fn format_relative_time(
     Future, "ar" -> "خلال " <> unit_text
     Past, "hi" -> unit_text <> " पहले"
     Future, "hi" -> unit_text <> " में"
+    Past, "sv" -> unit_text <> " sedan"
+    Future, "sv" -> "om " <> unit_text
     _, _ -> unit_text <> " ago"
     // Default fallback
   }
@@ -2136,8 +2139,8 @@ fn currency(
       let space = case language {
         "es" -> ""
         // Spanish: 24€ (no space)
-        "fr" | "de" | "it" -> " "
-        // French/German/Italian: 24 € (with space)
+        "fr" | "de" | "it" | "sv" -> " "
+        // French/German/Italian/Swedish: 24 € (with space)
         _ -> " "
         // Default with space
       }
@@ -2152,7 +2155,7 @@ fn percentage(number: Float, precision: Int, language: String) -> String {
   let percent_symbol = percent_symbol()
 
   case language {
-    "fr" -> formatted <> " " <> percent_symbol
+    "fr" | "sv" -> formatted <> " " <> percent_symbol
     _ -> formatted <> percent_symbol
   }
 }
@@ -2203,14 +2206,14 @@ fn compact(number: Float, language: String) -> String {
 // Locale-specific formatting helpers
 fn decimal_separator(language: String) -> String {
   case language {
-    "pt" | "es" | "fr" | "de" -> ","
+    "pt" | "es" | "fr" | "de" | "sv" -> ","
     _ -> "."
   }
 }
 
 fn thousands_separator(language: String) -> String {
   case language {
-    "fr" | "es" | "pt" | "it" -> " "
+    "fr" | "es" | "pt" | "it" | "sv" -> " "
     // Non-breaking space
     "de" | "at" | "ch" -> "."
     "in" -> ","
@@ -2226,6 +2229,7 @@ fn currency_symbol(currency_code: String) -> String {
     "GBP" -> "£"
     "BRL" -> "R$"
     "JPY" -> "¥"
+    "SEK" -> "kr"
     _ -> currency_code
   }
 }
@@ -2243,6 +2247,7 @@ fn currency_position(language: String) -> CurrencyPosition {
     "fr" -> After
     "de" -> After
     "it" -> After
+    "sv" -> After
     _ -> Before
   }
 }
@@ -2256,6 +2261,7 @@ fn thousand_suffix(language: String) -> String {
     "pt" -> "mil"
     "es" -> "k"
     "fr" -> "k"
+    "sv" -> "tn"
     _ -> "K"
   }
 }
@@ -2265,6 +2271,7 @@ fn million_suffix(language: String) -> String {
     "pt" -> "M"
     "es" -> "M"
     "fr" -> "M"
+    "sv" -> "mn"
     _ -> "M"
   }
 }
@@ -2274,6 +2281,7 @@ fn billion_suffix(language: String) -> String {
     "pt" -> "B"
     "es" -> "B"
     "fr" -> "Md"
+    "sv" -> "md"
     _ -> "B"
   }
 }
@@ -2318,6 +2326,7 @@ fn group_by_threes_simple(chars: List(String)) -> List(List(String)) {
 // Date formatting implementations
 fn date_short(date: calendar.Date, language: String) -> String {
   let year = date.year % 100 |> pad_zero
+  let full_year = date.year |> int.to_string
   let month = date.month |> month_to_int |> pad_zero
   let day = date.day |> pad_zero
   case language {
@@ -2326,6 +2335,7 @@ fn date_short(date: calendar.Date, language: String) -> String {
     "de" | "ru" -> day <> "." <> month <> "." <> year
     "zh" | "ja" | "ko" -> year <> "/" <> month <> "/" <> day
     "ar" | "hi" -> day <> "-" <> month <> "-" <> year
+    "sv" -> full_year <> "-" <> month <> "-" <> day
     _ -> day <> "-" <> month <> "-" <> year
   }
 }
@@ -2390,6 +2400,12 @@ fn date_medium(date: calendar.Date, language: String) -> String {
       <> " "
       <> int.to_string(date.year)
     "hi" ->
+      int.to_string(date.day)
+      <> " "
+      <> month_name
+      <> " "
+      <> int.to_string(date.year)
+    "sv" ->
       int.to_string(date.day)
       <> " "
       <> month_name
@@ -2470,6 +2486,13 @@ fn date_long(date: calendar.Date, language: String) -> String {
       <> int.to_string(date.year)
       <> " GMT"
     "hi" ->
+      int.to_string(date.day)
+      <> " "
+      <> month_name
+      <> " "
+      <> int.to_string(date.year)
+      <> " GMT"
+    "sv" ->
       int.to_string(date.day)
       <> " "
       <> month_name
@@ -2573,6 +2596,15 @@ fn date_full(date: calendar.Date, language: String) -> String {
     "hi" ->
       day_of_week
       <> ", "
+      <> int.to_string(date.day)
+      <> " "
+      <> month_name
+      <> " "
+      <> int.to_string(date.year)
+      <> " GMT"
+    "sv" ->
+      day_of_week
+      <> " "
       <> int.to_string(date.day)
       <> " "
       <> month_name
@@ -2987,6 +3019,30 @@ fn get_month_name(month: calendar.Month, language: String, full: Bool) -> String
     calendar.November, "hi", False -> "नव"
     calendar.December, "hi", True -> "दिसम्बर"
     calendar.December, "hi", False -> "दिस"
+    calendar.January, "sv", True -> "januari"
+    calendar.January, "sv", False -> "jan"
+    calendar.February, "sv", True -> "februari"
+    calendar.February, "sv", False -> "feb"
+    calendar.March, "sv", True -> "mars"
+    calendar.March, "sv", False -> "mars"
+    calendar.April, "sv", True -> "april"
+    calendar.April, "sv", False -> "apr"
+    calendar.May, "sv", True -> "maj"
+    calendar.May, "sv", False -> "maj"
+    calendar.June, "sv", True -> "juni"
+    calendar.June, "sv", False -> "juni"
+    calendar.July, "sv", True -> "juli"
+    calendar.July, "sv", False -> "juli"
+    calendar.August, "sv", True -> "augusti"
+    calendar.August, "sv", False -> "aug"
+    calendar.September, "sv", True -> "september"
+    calendar.September, "sv", False -> "sep"
+    calendar.October, "sv", True -> "oktober"
+    calendar.October, "sv", False -> "okt"
+    calendar.November, "sv", True -> "november"
+    calendar.November, "sv", False -> "nov"
+    calendar.December, "sv", True -> "december"
+    calendar.December, "sv", False -> "dec"
     _, _, _ ->
       case month {
         calendar.January -> "01"
@@ -3268,6 +3324,24 @@ fn format_time_unit(language: String, unit: String, count: Int) -> String {
         "year", _ -> count_str <> " साल"
         _, _ -> count_str <> " " <> unit
       }
+    "sv" ->
+      case unit, count {
+        "second", 1 -> "1 sekund"
+        "second", _ -> count_str <> " sekunder"
+        "minute", 1 -> "1 minut"
+        "minute", _ -> count_str <> " minuter"
+        "hour", 1 -> "1 timme"
+        "hour", _ -> count_str <> " timmar"
+        "day", 1 -> "1 dag"
+        "day", _ -> count_str <> " dagar"
+        "week", 1 -> "1 vecka"
+        "week", _ -> count_str <> " veckor"
+        "month", 1 -> "1 månad"
+        "month", _ -> count_str <> " månader"
+        "year", 1 -> "1 år"
+        "year", _ -> count_str <> " år"
+        _, _ -> count_str <> " " <> unit
+      }
     _ -> count_str <> " " <> unit
   }
 }
@@ -3366,6 +3440,13 @@ fn get_day_of_week_name(date: calendar.Date, language: String) -> String {
     4, "hi" -> "गुरुवार"
     5, "hi" -> "शुक्रवार"
     6, "hi" -> "शनिवार"
+    0, "sv" -> "söndag"
+    1, "sv" -> "måndag"
+    2, "sv" -> "tisdag"
+    3, "sv" -> "onsdag"
+    4, "sv" -> "torsdag"
+    5, "sv" -> "fredag"
+    6, "sv" -> "lördag"
     _, _ -> "Day " <> int.to_string(day_of_week)
   }
 }
